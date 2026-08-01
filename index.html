@@ -72,6 +72,24 @@
   }
   #lockBtn:hover { background:rgba(0,0,0,0.75); border-color:#fff; }
 
+  #chatBox {
+    position:fixed; left:12px; bottom:76px; width:420px; max-width:70vw; z-index:15; display:none;
+  }
+  #chatLog {
+    max-height:160px; overflow-y:auto; margin-bottom:4px; display:flex; flex-direction:column; gap:2px;
+  }
+  #chatLog div {
+    background:rgba(0,0,0,0.55); color:#fff; font-family:'VT323',monospace; font-size:15px;
+    padding:2px 8px; text-shadow:1px 1px 0 #000; width:fit-content; max-width:100%;
+  }
+  #chatLog div.chat-error { color:#ff6b6b; }
+  #chatLog div.chat-info { color:#8fe38f; }
+  #chatInput {
+    width:100%; box-sizing:border-box; font-family:'VT323',monospace; font-size:16px;
+    background:rgba(0,0,0,0.65); color:#fff; border:2px solid rgba(255,255,255,0.5);
+    padding:5px 8px; outline:none;
+  }
+
   #blocker, #menu {
     position:fixed; inset:0; z-index:100; background:rgba(0,0,0,0.6);
     display:flex; align-items:center; justify-content:center; flex-direction:column;
@@ -194,6 +212,10 @@
 <div id="nametag"></div>
 <div id="hotbar"></div>
 <button id="lockBtn">&#128274; Click to enable mouse-look</button>
+<div id="chatBox">
+  <div id="chatLog"></div>
+  <input type="text" id="chatInput" maxlength="120" placeholder="Type a message or /command, Enter to send">
+</div>
 
 <div id="blocker">
   <h1>&#9968; Voxel World</h1>
@@ -394,7 +416,7 @@ const ORE_DROP_REMAP = { grass:'dirt', stone:'cobblestone', coal_ore:'coal', red
 
 const HOTBAR = ['grass','dirt','cobblestone','stone','stone_bricks','sand','sandstone','snow','wood','planks','leaves',
   'cactus','glass','brick','obsidian','coal_ore','iron_ore','gold_ore','redstone_ore','lapis_ore',
-  'diamond_ore','crafting_table','furnace','flint_and_steel','eye_of_ender'];
+  'diamond_ore','crafting_table','furnace','flint_and_steel','eye_of_ender','end_frame'];
 /* non-block items that also need inventory slots (raw materials, ingots, sticks, tools), no hotbar/placement */
 const EXTRA_ITEMS = [
   'coal','redstone','lapis','diamond','stick','iron_ingot','gold_ingot','flint_and_steel',
@@ -968,13 +990,19 @@ function insertEyeOfEnder(x,y,z){
   addBlockLive(x,y,z, 'end_frame_eye');
   checkEndPortalCompletion();
 }
-function checkEndPortalCompletion(){
-  const allFilled = END_HUB_FRAME_CELLS.every(k=>{
+function countFilledHubSockets(){
+  return END_HUB_FRAME_CELLS.filter(k=>{
     const parts = k.split(',');
     const b = getBlock(parseInt(parts[0]), parseInt(parts[1]), parseInt(parts[2]));
     return b && b.type === 'end_frame_eye';
-  });
-  if(!allFilled) return;
+  }).length;
+}
+function checkEndPortalCompletion(){
+  const filled = countFilledHubSockets();
+  if(filled < END_HUB_FRAME_CELLS.length){
+    showToast('Eye of Ender placed (' + filled + '/' + END_HUB_FRAME_CELLS.length + ')');
+    return;
+  }
   for(const k of END_HUB_CENTER_CELLS){
     const parts = k.split(',');
     addBlockLive(parseInt(parts[0]), parseInt(parts[1]), parseInt(parts[2]), 'portal_end');
@@ -1459,12 +1487,12 @@ const RARITY = {
 };
 function rarityOf(name){ return RARITY[name] || 'common'; }
 
-const NON_ORE_HOTBAR = HOTBAR.filter(t => !['coal_ore','iron_ore','gold_ore','redstone_ore','lapis_ore','diamond_ore','crafting_table','furnace','flint_and_steel','eye_of_ender'].includes(t));
+const NON_ORE_HOTBAR = HOTBAR.filter(t => !['coal_ore','iron_ore','gold_ore','redstone_ore','lapis_ore','diamond_ore','crafting_table','furnace','flint_and_steel','eye_of_ender','end_frame'].includes(t));
 const INV_CATEGORIES = [
   { title:'Building Blocks', items: NON_ORE_HOTBAR },
   { title:'Ores & Gems', items: ['coal_ore','coal','iron_ore','iron_ingot','gold_ore','gold_ingot','redstone_ore','redstone','lapis_ore','lapis','diamond_ore','diamond'] },
   { title:'Workstations', items: ['crafting_table','furnace'] },
-  { title:'The End', items: ['ender_pearl','blaze_powder','eye_of_ender'] },
+  { title:'The End', items: ['ender_pearl','blaze_powder','eye_of_ender','end_frame'] },
   { title:'Tools & Materials', items: ['stick','flint_and_steel',
     'wood_pickaxe','stone_pickaxe','iron_pickaxe','diamond_pickaxe',
     'wood_axe','stone_axe','iron_axe','diamond_axe',
@@ -1768,6 +1796,11 @@ loadBtn.addEventListener('click', ()=>{
 
 /* ============================== INPUT ============================== */
 document.addEventListener('keydown', (e)=>{
+  if(e.code === 'KeyT'){
+    if(started && !paused && !chatOpen){ e.preventDefault(); openChat(); }
+    return;
+  }
+  if(chatOpen) return; // let the chat input's own listener handle everything while typing
   keys[e.code] = true;
   if(e.code === 'Escape' || e.code === 'KeyE'){
     if(!started) return;
@@ -1788,7 +1821,7 @@ document.addEventListener('keydown', (e)=>{
 });
 document.addEventListener('keyup', (e)=>{ keys[e.code] = false; });
 document.addEventListener('wheel', (e)=>{
-  if(!started || paused) return;
+  if(!started || paused || chatOpen) return;
   selectedSlot = (selectedSlot + (e.deltaY>0?1:-1) + HOTBAR.length) % HOTBAR.length;
   selectedType = HOTBAR[selectedSlot];
   updateHotbarUI();
@@ -1798,7 +1831,7 @@ renderer.domElement.addEventListener('contextmenu', (e)=> e.preventDefault());
 let isDraggingLook = false, dragMoved = false, dragLastX = 0, dragLastY = 0;
 
 document.addEventListener('mousemove', (e)=>{
-  if(!started || paused) return;
+  if(!started || paused || chatOpen) return;
   if(locked){
     const s = 0.0022 * mouseSensitivity;
     player.yaw -= e.movementX * s;
@@ -1818,7 +1851,7 @@ document.addEventListener('mousemove', (e)=>{
 });
 
 renderer.domElement.addEventListener('mousedown', (e)=>{
-  if(!started || paused) return;
+  if(!started || paused || chatOpen) return;
   if(locked){
     if(e.button === 0) performBreakAction();
     else if(e.button === 2) performPlaceAction();
@@ -1893,18 +1926,29 @@ function performBreakAction(){
     updateHotbarUI();
   }
 }
-function getForwardCell(dist){
+function tryLightPortalAlongRay(){
   camera.getWorldDirection(rayDir);
-  const px = camera.position.x + rayDir.x*dist;
-  const py = camera.position.y + rayDir.y*dist;
-  const pz = camera.position.z + rayDir.z*dist;
-  return { x: Math.floor(px), y: Math.floor(py), z: Math.floor(pz) };
+  rayOrigin.copy(camera.position);
+  const step = 0.15;
+  let lastCellKey = null;
+  for(let t=0; t<REACH; t+=step){
+    const px = rayOrigin.x + rayDir.x*t;
+    const py = rayOrigin.y + rayDir.y*t;
+    const pz = rayOrigin.z + rayDir.z*t;
+    const bx = Math.floor(px), by = Math.floor(py), bz = Math.floor(pz);
+    const cellKey = bx+','+by+','+bz;
+    if(cellKey === lastCellKey) continue;
+    lastCellKey = cellKey;
+    if(tryLightPortal(bx,by,bz)) return true;
+    const b = getBlock(bx,by,bz);
+    if(b && BLOCK_TYPES[b.type].solid && b.type !== 'obsidian') return false; // blocked by an unrelated solid block
+  }
+  return false;
 }
 function performPlaceAction(){
   if(selectedType === 'flint_and_steel'){
     if(!creative && (inventory.flint_and_steel||0) <= 0) return;
-    const cell = getForwardCell(3.2);
-    const lit = tryLightPortal(cell.x, cell.y, cell.z);
+    const lit = tryLightPortalAlongRay();
     showToast(lit ? 'The portal roars to life!' : 'Nothing happens \u2014 aim into an empty obsidian frame');
     return;
   }
@@ -2074,7 +2118,7 @@ function animate(){
   dt = Math.min(dt, 0.08);
   lastTime = now;
 
-  if(started && !paused){
+  if(started && !paused && !chatOpen){
     updatePlayer(dt);
     chunkTimer += dt;
     if(chunkTimer >= CHUNK_UPDATE_INTERVAL){
