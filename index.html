@@ -72,6 +72,24 @@
   }
   #lockBtn:hover { background:rgba(0,0,0,0.75); border-color:#fff; }
 
+  #chatBox {
+    position:fixed; left:12px; bottom:76px; width:420px; max-width:70vw; z-index:15; display:none;
+  }
+  #chatLog {
+    max-height:160px; overflow-y:auto; margin-bottom:4px; display:flex; flex-direction:column; gap:2px;
+  }
+  #chatLog div {
+    background:rgba(0,0,0,0.55); color:#fff; font-family:'VT323',monospace; font-size:15px;
+    padding:2px 8px; text-shadow:1px 1px 0 #000; width:fit-content; max-width:100%;
+  }
+  #chatLog div.chat-error { color:#ff6b6b; }
+  #chatLog div.chat-info { color:#8fe38f; }
+  #chatInput {
+    width:100%; box-sizing:border-box; font-family:'VT323',monospace; font-size:16px;
+    background:rgba(0,0,0,0.65); color:#fff; border:2px solid rgba(255,255,255,0.5);
+    padding:5px 8px; outline:none;
+  }
+
   #blocker, #menu {
     position:fixed; inset:0; z-index:100; background:rgba(0,0,0,0.6);
     display:flex; align-items:center; justify-content:center; flex-direction:column;
@@ -187,13 +205,17 @@
 <div id="hud">
   WASD move &nbsp;|&nbsp; Space jump/fly-up &nbsp;|&nbsp; Shift sprint/fly-down<br>
   Left click: break &nbsp;|&nbsp; Right click: place &nbsp;|&nbsp; 1-9 / scroll: hotbar<br>
-  E or Esc: pause &amp; craft &nbsp;|&nbsp; C: toggle Creative &nbsp;|&nbsp; Portals: walk in<br>
+  E or Esc: pause &amp; craft &nbsp;|&nbsp; C: toggle Creative &nbsp;|&nbsp; T: chat/commands<br>
   <span id="modeNote" style="opacity:0.8;"></span>
 </div>
 <div id="fps"></div>
 <div id="nametag"></div>
 <div id="hotbar"></div>
 <button id="lockBtn">&#128274; Click to enable mouse-look</button>
+<div id="chatBox">
+  <div id="chatLog"></div>
+  <input type="text" id="chatInput" maxlength="120" placeholder="Type a message or /command, Enter to send">
+</div>
 
 <div id="blocker">
   <h1>&#9968; Voxel World</h1>
@@ -388,17 +410,19 @@ const BLOCK_TYPES = {
   stone_bricks:   { color: 0x8f8f93, transparent:false, solid:true, tier:1 },
   end_frame:      { color: 0x7fae8f, transparent:false, solid:true, tier:999 },
   end_frame_eye:  { color: 0x7fae8f, transparent:false, solid:true, tier:999 },
+  end_loot:       { color: 0xb98b3d, transparent:false, solid:true, tier:999 },
+  shulker_box:    { color: 0x9c5bab, transparent:false, solid:true, tier:0 },
 };
 /* blocks that drop a different item than themselves when mined in survival */
 const ORE_DROP_REMAP = { grass:'dirt', stone:'cobblestone', coal_ore:'coal', redstone_ore:'redstone', lapis_ore:'lapis', diamond_ore:'diamond' };
 
 const HOTBAR = ['grass','dirt','cobblestone','stone','stone_bricks','sand','sandstone','snow','wood','planks','leaves',
   'cactus','glass','brick','obsidian','coal_ore','iron_ore','gold_ore','redstone_ore','lapis_ore',
-  'diamond_ore','crafting_table','furnace','flint_and_steel','eye_of_ender','end_frame'];
+  'diamond_ore','crafting_table','furnace','flint_and_steel','eye_of_ender','end_frame','shulker_box'];
 /* non-block items that also need inventory slots (raw materials, ingots, sticks, tools), no hotbar/placement */
 const EXTRA_ITEMS = [
   'coal','redstone','lapis','diamond','stick','iron_ingot','gold_ingot','flint_and_steel',
-  'ender_pearl','blaze_powder','eye_of_ender',
+  'ender_pearl','blaze_powder','eye_of_ender','raw_meat','elytra',
   'wood_pickaxe','stone_pickaxe','iron_pickaxe','diamond_pickaxe',
   'wood_axe','stone_axe','iron_axe','diamond_axe',
   'wood_shovel','stone_shovel','iron_shovel','diamond_shovel',
@@ -729,7 +753,7 @@ function worldToChunk(x,z){ return { cx: Math.floor(x/CHUNK_SIZE), cz: Math.floo
 
 /* ============================== DIMENSIONS ============================== */
 function makeDimState(){
-  return { chunks:new Map(), edits:new Map(), worldGroup:new THREE.Group() };
+  return { chunks:new Map(), edits:new Map(), worldGroup:new THREE.Group(), mobs:[], crystals:[], dragon:null };
 }
 const dimState = { overworld: makeDimState(), nether: makeDimState(), end: makeDimState() };
 let currentDim = 'overworld';
@@ -968,13 +992,19 @@ function insertEyeOfEnder(x,y,z){
   addBlockLive(x,y,z, 'end_frame_eye');
   checkEndPortalCompletion();
 }
-function checkEndPortalCompletion(){
-  const allFilled = END_HUB_FRAME_CELLS.every(k=>{
+function countFilledHubSockets(){
+  return END_HUB_FRAME_CELLS.filter(k=>{
     const parts = k.split(',');
     const b = getBlock(parseInt(parts[0]), parseInt(parts[1]), parseInt(parts[2]));
     return b && b.type === 'end_frame_eye';
-  });
-  if(!allFilled) return;
+  }).length;
+}
+function checkEndPortalCompletion(){
+  const filled = countFilledHubSockets();
+  if(filled < END_HUB_FRAME_CELLS.length){
+    showToast('Eye of Ender placed (' + filled + '/' + END_HUB_FRAME_CELLS.length + ')');
+    return;
+  }
   for(const k of END_HUB_CENTER_CELLS){
     const parts = k.split(',');
     addBlockLive(parseInt(parts[0]), parseInt(parts[1]), parseInt(parts[2]), 'portal_end');
@@ -1142,7 +1172,9 @@ function generateOverworldChunk(cx, cz){
 
   if(cx===0 && cz===0) buildOverworldPortals(natural);
 
-  return finishChunk(chunk, natural, cx, cz);
+  const result = finishChunk(chunk, natural, cx, cz);
+  trySpawnOverworldMobs(cx, cz);
+  return result;
 }
 
 /* ============================== GENERATION: NETHER ============================== */
@@ -1172,7 +1204,9 @@ function generateNetherChunk(cx, cz){
 
   if(cx===0 && cz===0) buildNetherReturnPortal(natural);
 
-  return finishChunk(chunk, natural, cx, cz);
+  const result = finishChunk(chunk, natural, cx, cz);
+  trySpawnGhast(cx, cz);
+  return result;
 }
 
 /* ============================== GENERATION: THE END ============================== */
@@ -1440,6 +1474,7 @@ const ITEM_COLORS = {
   coal: 0x2b2b2b, redstone: 0xc41e1e, lapis: 0x2450c9, diamond: 0x6be3e0,
   stick: 0xa9835a, iron_ingot: 0xe8e8ea, gold_ingot: 0xf6d94a, flint_and_steel: 0x5a5a5a,
   ender_pearl: 0x2e8f6b, blaze_powder: 0xe6c94d, eye_of_ender: 0x2ee6a8,
+  raw_meat: 0xc9605a, elytra: 0x4a3a5a,
 };
 const TOOL_MATERIAL_COLOR = { wood:0x8b5a2b, stone:0x8a8a8e, iron:0xd8d8da, diamond:0x6be3e0 };
 function getItemColor(name){
@@ -1452,20 +1487,20 @@ function getItemColor(name){
 }
 const RARITY = {
   diamond:'epic', diamond_ore:'epic', diamond_pickaxe:'epic', diamond_axe:'epic', diamond_shovel:'epic', diamond_sword:'epic',
-  eye_of_ender:'epic',
-  gold_ore:'rare', gold_ingot:'rare', lapis:'rare', lapis_ore:'rare', ender_pearl:'rare', blaze_powder:'rare',
+  eye_of_ender:'epic', elytra:'epic',
+  gold_ore:'rare', gold_ingot:'rare', lapis:'rare', lapis_ore:'rare', ender_pearl:'rare', blaze_powder:'rare', shulker_box:'rare',
   iron_ore:'uncommon', iron_ingot:'uncommon', redstone:'uncommon', redstone_ore:'uncommon',
   iron_pickaxe:'uncommon', iron_axe:'uncommon', iron_shovel:'uncommon', iron_sword:'uncommon',
 };
 function rarityOf(name){ return RARITY[name] || 'common'; }
 
-const NON_ORE_HOTBAR = HOTBAR.filter(t => !['coal_ore','iron_ore','gold_ore','redstone_ore','lapis_ore','diamond_ore','crafting_table','furnace','flint_and_steel','eye_of_ender','end_frame'].includes(t));
+const NON_ORE_HOTBAR = HOTBAR.filter(t => !['coal_ore','iron_ore','gold_ore','redstone_ore','lapis_ore','diamond_ore','crafting_table','furnace','flint_and_steel','eye_of_ender','end_frame','shulker_box'].includes(t));
 const INV_CATEGORIES = [
   { title:'Building Blocks', items: NON_ORE_HOTBAR },
   { title:'Ores & Gems', items: ['coal_ore','coal','iron_ore','iron_ingot','gold_ore','gold_ingot','redstone_ore','redstone','lapis_ore','lapis','diamond_ore','diamond'] },
   { title:'Workstations', items: ['crafting_table','furnace'] },
-  { title:'The End', items: ['ender_pearl','blaze_powder','eye_of_ender','end_frame'] },
-  { title:'Tools & Materials', items: ['stick','flint_and_steel',
+  { title:'The End', items: ['ender_pearl','blaze_powder','eye_of_ender','end_frame','elytra','shulker_box'] },
+  { title:'Tools & Materials', items: ['stick','flint_and_steel','raw_meat',
     'wood_pickaxe','stone_pickaxe','iron_pickaxe','diamond_pickaxe',
     'wood_axe','stone_axe','iron_axe','diamond_axe',
     'wood_shovel','stone_shovel','iron_shovel','diamond_shovel',
@@ -1567,6 +1602,7 @@ function travelTo(newDim, arrivalPos){
   applyDimensionAtmosphere(newDim);
   updateDimensionHUD();
   updateChunks();
+  if(newDim === 'end') spawnEndBossArena();
 }
 function checkPortal(dt){
   if(portalCooldown > 0){ portalCooldown -= dt; return; }
@@ -1609,6 +1645,113 @@ function updateLockBtn(){
   lockBtn.style.display = (started && !paused && !locked) ? 'block' : 'none';
 }
 lockBtn.addEventListener('click', requestLock);
+
+/* ============================== CHAT & COMMANDS ============================== */
+let chatOpen = false;
+const chatBox = document.getElementById('chatBox');
+const chatLog = document.getElementById('chatLog');
+const chatInput = document.getElementById('chatInput');
+
+function openChat(){
+  if(!started || paused || chatOpen) return;
+  chatOpen = true;
+  chatBox.style.display = 'block';
+  chatInput.value = '';
+  if(locked) document.exitPointerLock();
+  setTimeout(()=> chatInput.focus(), 0);
+}
+function closeChat(){
+  chatOpen = false;
+  chatBox.style.display = 'none';
+  chatInput.blur();
+  requestLock();
+}
+function logChat(msg, cls){
+  const line = document.createElement('div');
+  line.textContent = msg;
+  if(cls) line.className = cls;
+  chatLog.appendChild(line);
+  chatLog.scrollTop = chatLog.scrollHeight;
+  while(chatLog.children.length > 50) chatLog.removeChild(chatLog.firstChild);
+}
+chatInput.addEventListener('keydown', (e)=>{
+  e.stopPropagation();
+  if(e.code === 'Enter' || e.key === 'Enter'){ handleChatSubmit(); }
+  else if(e.code === 'Escape'){ closeChat(); }
+});
+chatInput.addEventListener('keyup', (e)=> e.stopPropagation());
+function handleChatSubmit(){
+  const raw = chatInput.value.trim();
+  closeChat();
+  if(!raw) return;
+  if(raw.startsWith('/')) runCommand(raw.slice(1));
+  else logChat(playerName + ': ' + raw);
+}
+function runCommand(cmdStr){
+  const parts = cmdStr.trim().split(/\s+/);
+  const cmd = (parts[0]||'').toLowerCase();
+  const args = parts.slice(1);
+  logChat('/' + cmdStr);
+  switch(cmd){
+    case 'help':
+      logChat('/time <day|night|noon|midnight|0-24>  /gamemode <creative|survival>  /give <item> [count]  /tp <x> <y> <z>  /tp <overworld|nether|end>  /clear  /list', 'chat-info');
+      break;
+    case 'time': {
+      const v = (args[0]||'').toLowerCase();
+      if(v === 'day' || v === 'noon') dayTime = DAY_LENGTH*0.25;
+      else if(v === 'night' || v === 'midnight') dayTime = DAY_LENGTH*0.75;
+      else if(args[0] !== undefined && !isNaN(parseFloat(args[0]))) dayTime = (parseFloat(args[0])/24)*DAY_LENGTH;
+      else { logChat('Usage: /time <day|night|noon|midnight|0-24>', 'chat-error'); break; }
+      logChat('Time set.', 'chat-info');
+      break;
+    }
+    case 'gamemode': case 'gm': {
+      const v = (args[0]||'').toLowerCase();
+      if(v==='creative'||v==='c'){ if(!creative) toggleCreative(); }
+      else if(v==='survival'||v==='s'){ if(creative) toggleCreative(); }
+      else { logChat('Usage: /gamemode <creative|survival>', 'chat-error'); break; }
+      renderInventoryPanel();
+      logChat('Game mode updated.', 'chat-info');
+      break;
+    }
+    case 'give': {
+      const itemName = (args[0]||'').toLowerCase();
+      const count = args[1] !== undefined ? parseInt(args[1]) : 1;
+      if(!ALL_ITEMS.includes(itemName)){ logChat('Unknown item: ' + itemName + ' (try /list)', 'chat-error'); break; }
+      inventory[itemName] = (inventory[itemName]||0) + (isNaN(count) ? 1 : count);
+      updateHotbarUI();
+      logChat('Gave ' + (isNaN(count)?1:count) + ' ' + itemName, 'chat-info');
+      break;
+    }
+    case 'clear': {
+      for(const t of ALL_ITEMS) inventory[t] = 0;
+      updateHotbarUI();
+      logChat('Inventory cleared.', 'chat-info');
+      break;
+    }
+    case 'tp': {
+      if(args.length >= 3){
+        const x = parseFloat(args[0]), y = parseFloat(args[1]), z = parseFloat(args[2]);
+        if([x,y,z].some(isNaN)){ logChat('Usage: /tp <x> <y> <z>', 'chat-error'); break; }
+        player.pos.set(x,y,z); player.vel.set(0,0,0);
+        logChat('Teleported to ' + x + ', ' + y + ', ' + z, 'chat-info');
+      } else if(args.length === 1 && ['overworld','nether','end'].includes(args[0].toLowerCase())){
+        const d = args[0].toLowerCase();
+        const arrival = d==='overworld' ? OW_NETHER_ARRIVAL : d==='nether' ? NETHER_ARRIVAL : END_ARRIVAL;
+        travelTo(d, arrival);
+        logChat('Teleported to ' + d, 'chat-info');
+      } else {
+        logChat('Usage: /tp <x> <y> <z>  or  /tp <overworld|nether|end>', 'chat-error');
+      }
+      break;
+    }
+    case 'list':
+      logChat('Items: ' + ALL_ITEMS.join(', '), 'chat-info');
+      break;
+    default:
+      logChat('Unknown command: /' + cmd + ' (try /help)', 'chat-error');
+  }
+}
 
 startbtn.addEventListener('click', ()=>{
   started = true;
@@ -1768,6 +1911,11 @@ loadBtn.addEventListener('click', ()=>{
 
 /* ============================== INPUT ============================== */
 document.addEventListener('keydown', (e)=>{
+  if(e.code === 'KeyT'){
+    if(started && !paused && !chatOpen){ e.preventDefault(); openChat(); }
+    return;
+  }
+  if(chatOpen) return; // let the chat input's own listener handle everything while typing
   keys[e.code] = true;
   if(e.code === 'Escape' || e.code === 'KeyE'){
     if(!started) return;
@@ -1788,7 +1936,7 @@ document.addEventListener('keydown', (e)=>{
 });
 document.addEventListener('keyup', (e)=>{ keys[e.code] = false; });
 document.addEventListener('wheel', (e)=>{
-  if(!started || paused) return;
+  if(!started || paused || chatOpen) return;
   selectedSlot = (selectedSlot + (e.deltaY>0?1:-1) + HOTBAR.length) % HOTBAR.length;
   selectedType = HOTBAR[selectedSlot];
   updateHotbarUI();
@@ -1798,7 +1946,7 @@ renderer.domElement.addEventListener('contextmenu', (e)=> e.preventDefault());
 let isDraggingLook = false, dragMoved = false, dragLastX = 0, dragLastY = 0;
 
 document.addEventListener('mousemove', (e)=>{
-  if(!started || paused) return;
+  if(!started || paused || chatOpen) return;
   if(locked){
     const s = 0.0022 * mouseSensitivity;
     player.yaw -= e.movementX * s;
@@ -1818,7 +1966,7 @@ document.addEventListener('mousemove', (e)=>{
 });
 
 renderer.domElement.addEventListener('mousedown', (e)=>{
-  if(!started || paused) return;
+  if(!started || paused || chatOpen) return;
   if(locked){
     if(e.button === 0) performBreakAction();
     else if(e.button === 2) performPlaceAction();
@@ -2051,6 +2199,277 @@ function updatePlayer(dt){
   checkPortal(dt);
 }
 
+/* ============================== MOBS ============================== */
+const MOB_DEFS = {
+  cow:     { bodyColor:0x4a3120, headColor:0xe8ded0, bodySize:[1.1,0.9,1.8], headOffset:[0,0.5,1.0], headSize:0.55, hp:10, speed:1.4, dim:'overworld', drop:'raw_meat' },
+  pig:     { bodyColor:0xe8a0b0, headColor:0xe8a0b0, bodySize:[1.0,0.8,1.6], headOffset:[0,0.4,0.9], headSize:0.5,  hp:8,  speed:1.5, dim:'overworld', drop:'raw_meat' },
+  sheep:   { bodyColor:0xf2f2f2, headColor:0x9c9c9c, bodySize:[1.1,0.9,1.6], headOffset:[0,0.5,0.95],headSize:0.5,  hp:8,  speed:1.2, dim:'overworld', drop:'raw_meat' },
+  chicken: { bodyColor:0xf5f0e0, headColor:0xd8302a, bodySize:[0.7,0.7,0.9], headOffset:[0,0.45,0.55],headSize:0.3, hp:4,  speed:1.6, dim:'overworld', drop:'raw_meat' },
+  ghast:   { bodyColor:0xe8e8e8, headColor:null,     bodySize:[2.6,2.6,2.6], headOffset:[0,0,0],       headSize:0,   hp:20, speed:1.0, dim:'nether',    drop:null, hover:true },
+  ender_dragon: { bodyColor:0x1a0a26, headColor:0x2a1436, bodySize:[3,2.2,6], headOffset:[0,0.4,4.2], headSize:1.1, hp:100, speed:1.0, dim:'end', drop:null, hover:true, boss:true },
+};
+function createMob(type, x, y, z){
+  const def = MOB_DEFS[type];
+  const group = new THREE.Group();
+  const body = new THREE.Mesh(new THREE.BoxGeometry(def.bodySize[0], def.bodySize[1], def.bodySize[2]), new THREE.MeshLambertMaterial({ color: def.bodyColor }));
+  group.add(body);
+  if(def.headSize > 0){
+    const head = new THREE.Mesh(new THREE.BoxGeometry(def.headSize, def.headSize, def.headSize), new THREE.MeshLambertMaterial({ color: def.headColor }));
+    head.position.set(def.headOffset[0], def.headOffset[1], def.headOffset[2]);
+    group.add(head);
+  }
+  group.position.set(x,y,z);
+  dimState[def.dim].worldGroup.add(group);
+  const mob = {
+    type, group, pos: new THREE.Vector3(x,y,z), vel: new THREE.Vector3(),
+    hp: def.hp, maxHp: def.hp, dead:false, deathTimer:0,
+    wanderTimer:0, wanderDir:new THREE.Vector3(), grounded:false,
+    circleAngle: Math.random()*Math.PI*2, spawnPos: new THREE.Vector3(x,y,z)
+  };
+  dimState[def.dim].mobs.push(mob);
+  return mob;
+}
+function createEndCrystal(x,y,z){
+  const group = new THREE.Group();
+  const core = new THREE.Mesh(new THREE.OctahedronGeometry(0.7), new THREE.MeshLambertMaterial({ color:0x8fe6ff, emissive:0x1a4a5f }));
+  const base = new THREE.Mesh(new THREE.BoxGeometry(1.2,0.3,1.2), new THREE.MeshLambertMaterial({ color:0x2a1a3a }));
+  base.position.set(0,-0.6,0);
+  group.add(core); group.add(base);
+  group.position.set(x,y,z);
+  dimState.end.worldGroup.add(group);
+  return { group, core, pos:new THREE.Vector3(x,y,z), hp:5, maxHp:5, dead:false, deathTimer:0, bobPhase:Math.random()*Math.PI*2 };
+}
+
+function updateWanderAI(m, dt){
+  const def = MOB_DEFS[m.type];
+  m.wanderTimer -= dt;
+  if(m.wanderTimer <= 0){
+    m.wanderTimer = 2 + Math.random()*3;
+    if(Math.random() < 0.3){ m.wanderDir.set(0,0,0); }
+    else { const a = Math.random()*Math.PI*2; m.wanderDir.set(Math.sin(a), 0, Math.cos(a)); }
+  }
+  m.vel.y -= GRAVITY*dt;
+  if(m.vel.y < -30) m.vel.y = -30;
+  const nx = m.pos.x + m.wanderDir.x*def.speed*dt;
+  const nz = m.pos.z + m.wanderDir.z*def.speed*dt;
+  if(!isSolid(Math.floor(nx), Math.floor(m.pos.y), Math.floor(m.pos.z))) m.pos.x = nx;
+  if(!isSolid(Math.floor(m.pos.x), Math.floor(m.pos.y), Math.floor(nz))) m.pos.z = nz;
+  const ny = m.pos.y + m.vel.y*dt;
+  if(isSolid(Math.floor(m.pos.x), Math.floor(ny), Math.floor(m.pos.z))){ m.vel.y = 0; m.grounded = true; }
+  else { m.pos.y = ny; m.grounded = false; }
+  if(m.wanderDir.lengthSq() > 0.001) m.group.rotation.y = Math.atan2(m.wanderDir.x, m.wanderDir.z);
+}
+function updateHoverAI(m, dt){
+  const def = MOB_DEFS[m.type];
+  m.wanderTimer -= dt;
+  if(m.wanderTimer <= 0){
+    m.wanderTimer = 3 + Math.random()*3;
+    m.wanderDir.set((Math.random()-0.5), (Math.random()-0.5)*0.4, (Math.random()-0.5));
+    if(m.wanderDir.lengthSq() > 0.0001) m.wanderDir.normalize();
+  }
+  m.pos.addScaledVector(m.wanderDir, def.speed*dt);
+  const offset = m.pos.clone().sub(m.spawnPos);
+  if(offset.length() > 18) m.pos.sub(offset.clone().normalize().multiplyScalar(0.4));
+  if(m.pos.y < m.spawnPos.y - 4) m.pos.y = m.spawnPos.y - 4;
+  m.group.rotation.y += dt*0.15;
+}
+function updateDragonAI(m, dt){
+  m.circleAngle += dt * 0.22;
+  const radius = 26;
+  const height = m.spawnPos.y + 10 + Math.sin(m.circleAngle*0.5)*4;
+  m.pos.x = m.spawnPos.x + Math.cos(m.circleAngle)*radius;
+  m.pos.z = m.spawnPos.z + Math.sin(m.circleAngle)*radius;
+  m.pos.y = height;
+  m.group.rotation.y = -m.circleAngle + Math.PI/2;
+  const crystals = dimState.end.crystals || [];
+  if(crystals.some(c=>!c.dead) && m.hp < m.maxHp){
+    m.hp = Math.min(m.maxHp, m.hp + dt*1.2);
+  }
+}
+function updateMobs(dt){
+  const mobList = dim().mobs;
+  for(let i=mobList.length-1; i>=0; i--){
+    const m = mobList[i];
+    if(m.dead){
+      m.deathTimer += dt;
+      const s = Math.max(0, 1 - m.deathTimer/1.2);
+      m.group.scale.set(s,s,s);
+      if(m.deathTimer > 1.2){ dim().worldGroup.remove(m.group); mobList.splice(i,1); }
+      continue;
+    }
+    const def = MOB_DEFS[m.type];
+    if(def.boss) updateDragonAI(m, dt);
+    else if(def.hover) updateHoverAI(m, dt);
+    else updateWanderAI(m, dt);
+    m.group.position.copy(m.pos);
+  }
+  const crystals = dim().crystals || [];
+  for(let i=crystals.length-1; i>=0; i--){
+    const c = crystals[i];
+    if(c.dead){
+      c.deathTimer += dt;
+      const s = Math.max(0, 1 - c.deathTimer/0.8);
+      c.group.scale.set(s,s,s);
+      if(c.deathTimer > 0.8){ dim().worldGroup.remove(c.group); crystals.splice(i,1); }
+      continue;
+    }
+    c.bobPhase += dt;
+    c.core.position.y = Math.sin(c.bobPhase*1.5)*0.15;
+    c.core.rotation.y += dt*0.8;
+  }
+}
+
+/* ---- spawning ---- */
+function trySpawnOverworldMobs(cx, cz){
+  if(Math.random() > 0.35) return;
+  const lx = 4 + Math.floor(Math.random()*(CHUNK_SIZE-8));
+  const lz = 4 + Math.floor(Math.random()*(CHUNK_SIZE-8));
+  const wx = cx*CHUNK_SIZE+lx, wz = cz*CHUNK_SIZE+lz;
+  const biome = biomeAt(wx,wz);
+  if(biome !== 'plains' && biome !== 'forest') return;
+  const h = terrainHeight(wx,wz);
+  if(h <= WATER_LEVEL+1) return;
+  const types = ['cow','pig','sheep','chicken'];
+  const count = 1 + Math.floor(Math.random()*2);
+  for(let i=0;i<count;i++){
+    const type = types[Math.floor(Math.random()*types.length)];
+    createMob(type, wx+0.5+i*0.6, h+1, wz+0.5);
+  }
+}
+function trySpawnGhast(cx, cz){
+  if(Math.random() > 0.15) return;
+  const lx = 4 + Math.floor(Math.random()*(CHUNK_SIZE-8));
+  const lz = 4 + Math.floor(Math.random()*(CHUNK_SIZE-8));
+  const wx = cx*CHUNK_SIZE+lx, wz = cz*CHUNK_SIZE+lz;
+  const h = netherTerrainHeight(wx,wz);
+  createMob('ghast', wx+0.5, h+8, wz+0.5);
+}
+
+let endBossArenaSpawned = false;
+function spawnEndBossArena(){
+  if(endBossArenaSpawned) return;
+  endBossArenaSpawned = true;
+  const baseX = END_ARRIVAL.x, baseZ = END_ARRIVAL.z, baseY = END_ANCHOR_H;
+  const offsets = [[10,10],[10,-10],[-10,10],[-10,-10]];
+  for(const [dx,dz] of offsets){
+    const px = Math.round(baseX+dx), pz = Math.round(baseZ+dz);
+    for(let y=baseY-2; y<=baseY+6; y++) addBlockLive(px, y, pz, 'obsidian');
+    dimState.end.crystals.push(createEndCrystal(px+0.5, baseY+7.5, pz+0.5));
+  }
+  dimState.end.dragon = createMob('ender_dragon', baseX, baseY+15, baseZ);
+
+  // a small End City off to the side, with an Elytra + Shulker Box loot reward
+  const cityX = Math.round(baseX+55), cityZ = Math.round(baseZ+55);
+  for(let dx=-2; dx<=2; dx++){
+    for(let dz=-2; dz<=2; dz++){
+      for(let y=baseY; y<=baseY+7; y++){
+        const edge = Math.abs(dx)===2 || Math.abs(dz)===2;
+        if(!edge && y>baseY && y<baseY+7) continue; // hollow interior
+        const isWindow = edge && y===baseY+4 && (dx===0||dz===0);
+        addBlockLive(cityX+dx, y, cityZ+dz, isWindow ? 'glass' : 'endstone');
+      }
+    }
+  }
+  addBlockLive(cityX, baseY+1, cityZ, 'end_loot');
+  showToast('An End City glimmers in the distance...');
+}
+
+let endCityLooted = false;
+function lootEndCity(){
+  if(endCityLooted){ showToast('Already looted.'); return; }
+  endCityLooted = true;
+  inventory.elytra = (inventory.elytra||0) + 1;
+  inventory.shulker_box = (inventory.shulker_box||0) + 1;
+  updateHotbarUI();
+  showToast('Found an Elytra and a Shulker Box!');
+}
+
+function spawnEndGateway(x,y,z){
+  for(let dx=-1; dx<=1; dx++){
+    for(let dz=-1; dz<=1; dz++){
+      if(dx===0 && dz===0) continue;
+      addBlockLive(x+dx, y-1, z+dz, 'obsidian');
+    }
+  }
+  addBlockLive(x, y, z, 'portal_end');
+  showToast('An End Gateway has opened nearby!');
+}
+
+/* ---- victory banner ---- */
+function showVictoryBanner(){
+  const el = document.getElementById('victoryBanner');
+  el.style.display = 'flex';
+  requestAnimationFrame(()=> el.classList.add('show'));
+  setTimeout(()=>{
+    el.classList.remove('show');
+    setTimeout(()=> el.style.display = 'none', 1200);
+  }, 5000);
+}
+
+function onDragonDefeated(mob){
+  showVictoryBanner();
+  spawnEndGateway(Math.round(mob.pos.x), Math.round(mob.spawnPos.y+10), Math.round(mob.pos.z));
+}
+
+function killMob(mob){
+  mob.dead = true;
+  const def = MOB_DEFS[mob.type];
+  if(def.boss){
+    onDragonDefeated(mob);
+  } else {
+    if(def.drop){ inventory[def.drop] = (inventory[def.drop]||0)+1; updateHotbarUI(); }
+    showToast('Defeated the ' + labelize(mob.type));
+  }
+}
+function killCrystal(c){
+  c.dead = true;
+  showToast('End Crystal destroyed!');
+}
+
+/* ---- targeting & combat ---- */
+function pickMob(){
+  camera.getWorldDirection(rayDir);
+  let closest = null, closestDist = REACH;
+  for(const m of dim().mobs){
+    if(m.dead) continue;
+    const toMob = m.pos.clone().sub(camera.position);
+    const dist = toMob.length();
+    if(dist > REACH || dist < 0.001) continue;
+    toMob.normalize();
+    if(toMob.dot(rayDir) > 0.92 && dist < closestDist){ closest = m; closestDist = dist; }
+  }
+  return closest;
+}
+function pickCrystal(){
+  camera.getWorldDirection(rayDir);
+  let closest = null, closestDist = REACH;
+  for(const c of (dim().crystals||[])){
+    if(c.dead) continue;
+    const toC = c.pos.clone().sub(camera.position);
+    const dist = toC.length();
+    if(dist > REACH || dist < 0.001) continue;
+    toC.normalize();
+    if(toC.dot(rayDir) > 0.92 && dist < closestDist){ closest = c; closestDist = dist; }
+  }
+  return closest;
+}
+function bestSwordDamage(){
+  if(inventory.diamond_sword>0) return 5;
+  if(inventory.iron_sword>0) return 4;
+  if(inventory.stone_sword>0) return 3;
+  if(inventory.wood_sword>0) return 2;
+  return 1;
+}
+function attackMob(mob){
+  mob.hp -= bestSwordDamage();
+  if(mob.hp <= 0 && !mob.dead) killMob(mob);
+  else if(MOB_DEFS[mob.type].boss) showToast('Ender Dragon: ' + Math.max(0,Math.round(mob.hp)) + '/' + mob.maxHp + ' HP');
+}
+function attackCrystal(c){
+  c.hp -= bestSwordDamage();
+  if(c.hp <= 0 && !c.dead) killCrystal(c);
+}
+
 /* ============================== DAY / NIGHT CYCLE (overworld only) ============================== */
 const DAY_LENGTH = 150;
 let dayTime = 40;
@@ -2085,7 +2504,7 @@ function animate(){
   dt = Math.min(dt, 0.08);
   lastTime = now;
 
-  if(started && !paused){
+  if(started && !paused && !chatOpen){
     updatePlayer(dt);
     chunkTimer += dt;
     if(chunkTimer >= CHUNK_UPDATE_INTERVAL){
