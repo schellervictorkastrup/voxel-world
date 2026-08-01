@@ -1,0 +1,2102 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Voxel World</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Press+Start+2P&family=VT323&display=swap');
+
+  html, body { margin:0; padding:0; overflow:hidden; width:100%; height:100%; background:#87CEEB; font-family:'VT323', 'Segoe UI', Arial, sans-serif; user-select:none; }
+  canvas { display:block; }
+
+  #crosshair {
+    position:fixed; top:50%; left:50%; transform:translate(-50%,-50%);
+    width:20px; height:20px; pointer-events:none; z-index:10;
+  }
+  #crosshair::before, #crosshair::after {
+    content:''; position:absolute; background:rgba(255,255,255,0.9);
+    box-shadow:0 0 2px rgba(0,0,0,0.8);
+  }
+  #crosshair::before { left:9px; top:2px; width:2px; height:16px; }
+  #crosshair::after { top:9px; left:2px; height:2px; width:16px; }
+
+  /* ---- in-game hotbar: classic Minecraft slot look ---- */
+  #hotbar {
+    position:fixed; bottom:14px; left:50%; transform:translateX(-50%);
+    display:flex; flex-wrap:wrap; justify-content:center; gap:3px; z-index:10;
+    background:#8b8b8b; padding:4px; max-width:96vw;
+    border:3px solid #373737;
+    box-shadow:inset 2px 2px 0 rgba(255,255,255,0.3), inset -2px -2px 0 rgba(0,0,0,0.4);
+  }
+  .slot {
+    width:42px; height:42px; box-sizing:border-box; position:relative;
+    display:flex; align-items:center; justify-content:center; cursor:pointer;
+    background:#8b8b8b; border:2px solid #373737;
+    box-shadow:inset 2px 2px 0 rgba(0,0,0,0.35), inset -2px -2px 0 rgba(255,255,255,0.25);
+  }
+  .slot:hover { background:#a3a3a3; box-shadow:inset 0 0 0 2px #fff, inset 2px 2px 0 rgba(0,0,0,0.25); }
+  .slot .swatch { width:28px; height:28px; box-shadow:inset 0 0 5px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.3); }
+  .slot.selected { border-color:#fff; box-shadow:inset 0 0 0 2px #fff, 0 0 6px rgba(255,255,255,0.7); }
+  .slot.empty .swatch { opacity:0.3; filter:grayscale(0.7); }
+  .slot .num { position:absolute; top:1px; left:3px; font-family:'VT323',monospace; font-size:13px; color:#fff; text-shadow:1px 1px 0 #000; }
+  .slot .count { position:absolute; bottom:0px; right:3px; font-family:'VT323',monospace; font-size:15px; font-weight:bold; color:#fff; text-shadow:1px 1px 0 #000; }
+
+  #hud {
+    position:fixed; top:10px; left:10px; color:#fff; z-index:10;
+    text-shadow:0 0 4px #000, 0 0 2px #000; font-size:15px; line-height:1.4;
+    background:rgba(0,0,0,0.25); padding:8px 12px; max-width:360px;
+  }
+  #fps { position:fixed; top:10px; right:10px; color:#fff; z-index:10; font-size:14px; text-shadow:0 0 3px #000; text-align:right; }
+  #nametag { position:fixed; top:32px; right:10px; color:#ffd479; z-index:10; font-size:14px; text-shadow:0 0 3px #000; text-align:right; font-weight:bold; }
+
+  #dimBadge {
+    position:fixed; top:10px; left:50%; transform:translateX(-50%);
+    z-index:10; color:#fff; font-size:16px; font-weight:bold; letter-spacing:1px;
+    text-shadow:0 0 6px #000, 0 0 3px #000; background:rgba(0,0,0,0.3);
+    padding:5px 16px;
+  }
+
+  #toast {
+    position:fixed; top:38%; left:50%; transform:translate(-50%,-50%);
+    z-index:15; color:#fff; font-size:18px; text-shadow:0 0 6px #000;
+    background:rgba(0,0,0,0.55); padding:8px 18px;
+    opacity:0; transition:opacity 0.25s; pointer-events:none;
+  }
+  #toast.show { opacity:1; }
+
+  #lockBtn {
+    position:fixed; top:50%; left:50%; transform:translate(-50%, 40px);
+    z-index:20; display:none; padding:10px 20px; font-size:16px; font-family:'VT323',monospace;
+    background:rgba(0,0,0,0.55); color:#fff; border:2px solid rgba(255,255,255,0.6);
+    cursor:pointer; text-shadow:0 0 3px #000;
+  }
+  #lockBtn:hover { background:rgba(0,0,0,0.75); border-color:#fff; }
+
+  #blocker, #menu {
+    position:fixed; inset:0; z-index:100; background:rgba(0,0,0,0.6);
+    display:flex; align-items:center; justify-content:center; flex-direction:column;
+    color:#fff; text-align:center;
+  }
+  #menu { display:none; }
+  #blocker h1 { font-family:'Press Start 2P', monospace; font-size:22px; margin-bottom:14px; text-shadow:2px 2px 0 #000; line-height:1.6; }
+  #blocker p, #menu p { max-width:480px; line-height:1.4; font-size:17px; opacity:0.95; }
+
+  /* ---- blocky Minecraft-style buttons ---- */
+  .bigbtn {
+    margin-top:14px; padding:10px 26px; font-size:16px; font-family:'VT323',monospace;
+    background:#6b8e4e; color:#fff; text-shadow:1px 1px 0 rgba(0,0,0,0.6);
+    border:2px solid #2b2b2b; cursor:pointer; letter-spacing:0.5px;
+    box-shadow:inset 2px 2px 0 rgba(255,255,255,0.3), inset -3px -3px 0 rgba(0,0,0,0.35);
+  }
+  .bigbtn:hover { filter:brightness(1.12); }
+  .bigbtn:active { box-shadow:inset -2px -2px 0 rgba(255,255,255,0.2), inset 3px 3px 0 rgba(0,0,0,0.35); }
+  .bigbtn.secondary { background:#4a7fb0; }
+  .bigbtn.creative { background:#c78a1e; }
+  .bigbtn:disabled { background:#6b6b6b; box-shadow:inset 2px 2px 0 rgba(255,255,255,0.15), inset -3px -3px 0 rgba(0,0,0,0.3); cursor:not-allowed; opacity:0.6; }
+
+  /* ---- pause menu: classic Minecraft grey stone GUI panel ---- */
+  .menu-box {
+    max-width:660px; max-height:88vh; overflow-y:auto; text-align:left;
+    background:#c6c6c6; color:#373737;
+    border:4px solid #373737;
+    box-shadow:inset 2px 2px 0 rgba(255,255,255,0.5), inset -3px -3px 0 rgba(0,0,0,0.25), 0 10px 40px rgba(0,0,0,0.6);
+    padding:20px 26px;
+  }
+  .menu-box h2 { font-family:'Press Start 2P', monospace; font-size:16px; text-align:center; color:#373737; text-shadow:1px 1px 0 rgba(255,255,255,0.4); margin-bottom:10px; }
+  .menu-box h3 { font-family:'Press Start 2P', monospace; text-align:left; margin:20px 0 8px; font-size:12px;
+    color:#373737; border-bottom:2px solid #8b8b8b; padding-bottom:8px; }
+  .menu-box p { color:#373737; opacity:0.85; }
+  #craftList { text-align:left; margin-top:8px; }
+  .craft-section-title, .inv-section-title {
+    font-family:'VT323',monospace; font-size:15px; text-transform:uppercase; letter-spacing:1.5px;
+    color:#5a5a5a; margin:14px 0 6px; font-weight:600;
+  }
+  .craft-section-title.workstation-active {
+    color:#a35b00; text-shadow:0 0 6px rgba(255,180,60,0.6);
+    animation:workstationGlow 1.6s ease-in-out 2;
+  }
+  @keyframes workstationGlow {
+    0%,100% { text-shadow:0 0 2px rgba(255,140,0,0.3); }
+    50% { text-shadow:0 0 10px rgba(255,140,0,0.9); }
+  }
+
+  /* ---- inventory grid: Minecraft slot styling ---- */
+  #inventoryList { margin-top:6px; }
+  .inv-grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(58px, 1fr)); gap:4px; margin-bottom:8px; }
+  .inv-cell {
+    position:relative; aspect-ratio:1; padding:4px 2px 3px; box-sizing:border-box;
+    display:flex; flex-direction:column; align-items:center; justify-content:center;
+    background:#8b8b8b; border:2px solid #373737;
+    box-shadow:inset 2px 2px 0 rgba(0,0,0,0.35), inset -2px -2px 0 rgba(255,255,255,0.25);
+  }
+  .inv-cell:hover { background:#a3a3a3; box-shadow:inset 0 0 0 2px #fff, inset 2px 2px 0 rgba(0,0,0,0.25); z-index:2; }
+  .inv-cell.empty { opacity:0.45; filter:grayscale(0.75); }
+  .inv-cell.empty:hover { opacity:0.7; }
+  .inv-swatch {
+    width:24px; height:24px; margin-bottom:2px; position:relative; overflow:hidden;
+    box-shadow:inset 0 0 6px rgba(0,0,0,0.55), inset 0 2px 0 rgba(255,255,255,0.35), inset 0 -2px 0 rgba(0,0,0,0.35);
+  }
+  .inv-count { font-family:'VT323',monospace; font-size:14px; font-weight:800; color:#fff; text-shadow:1px 1px 0 #000; line-height:1; }
+  .inv-name { font-family:'VT323',monospace; font-size:10px; color:#2e2e2e; text-align:center; line-height:1.1;
+    margin-top:2px; max-width:100%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+
+  /* rarity shown via Minecraft's real item-name colors: white/uncommon-yellow/rare-aqua/epic-purple */
+  .inv-cell.rarity-uncommon .inv-name { color:#8a7a00; font-weight:bold; }
+  .inv-cell.rarity-rare .inv-name { color:#0c8a8a; font-weight:bold; }
+  .inv-cell.rarity-epic .inv-name { color:#a02ec0; font-weight:bold; }
+  .inv-cell.rarity-epic .inv-swatch::after {
+    content:''; position:absolute; inset:0;
+    background:linear-gradient(120deg, transparent 30%, rgba(255,255,255,0.65) 48%, rgba(230,180,255,0.55) 52%, transparent 70%);
+    background-size:250% 250%; animation:enchantGlint 2.8s linear infinite;
+  }
+  @keyframes enchantGlint {
+    0% { background-position:120% -20%; }
+    100% { background-position:-20% 120%; }
+  }
+
+  #hotbarMirror { display:flex; flex-wrap:wrap; gap:3px; margin-top:6px; padding:6px; background:#a8a8a8; border:2px solid #373737; }
+
+  .craft-row { display:flex; align-items:center; justify-content:space-between; gap:12px;
+    background:#b0b0b0; border:2px solid #8b8b8b; padding:7px 10px; margin-bottom:5px; font-size:14px; color:#2e2e2e; }
+  .craft-row button {
+    padding:5px 14px; font-family:'VT323',monospace; font-size:14px; cursor:pointer;
+    background:#6b8e4e; color:#fff; text-shadow:1px 1px 0 rgba(0,0,0,0.5);
+    border:2px solid #2b2b2b; box-shadow:inset 1px 1px 0 rgba(255,255,255,0.3), inset -2px -2px 0 rgba(0,0,0,0.3);
+  }
+  .craft-row button:disabled { background:#8b8b8b; box-shadow:none; cursor:not-allowed; opacity:0.7; text-shadow:none; }
+  #menuMsg { min-height:20px; color:#2e6b2e; font-size:15px; font-weight:bold; }
+
+  #settingsList { display:flex; flex-direction:column; gap:10px; margin-top:6px; }
+  .settings-row { display:flex; align-items:center; justify-content:space-between; gap:14px;
+    background:#b0b0b0; border:2px solid #8b8b8b; padding:8px 12px; font-size:14px; color:#2e2e2e; }
+  .settings-row label { flex-shrink:0; font-family:'VT323',monospace; }
+  .settings-row label span { color:#5a5a5a; }
+  .settings-row input[type="range"] { flex:1; max-width:220px; accent-color:#6b8e4e; }
+  .settings-row input[type="text"] {
+    flex:1; max-width:220px; font-family:'VT323',monospace; font-size:15px;
+    background:#8b8b8b; border:2px solid #373737; color:#fff; padding:4px 8px;
+    box-shadow:inset 2px 2px 0 rgba(0,0,0,0.35), inset -2px -2px 0 rgba(255,255,255,0.2);
+  }
+</style>
+</head>
+<body>
+
+<div id="crosshair"></div>
+<div id="dimBadge">Overworld</div>
+<div id="toast"></div>
+<div id="hud">
+  WASD move &nbsp;|&nbsp; Space jump/fly-up &nbsp;|&nbsp; Shift sprint/fly-down<br>
+  Left click: break &nbsp;|&nbsp; Right click: place &nbsp;|&nbsp; 1-9 / scroll: hotbar<br>
+  E or Esc: pause &amp; craft &nbsp;|&nbsp; C: toggle Creative &nbsp;|&nbsp; Portals: walk in<br>
+  <span id="modeNote" style="opacity:0.8;"></span>
+</div>
+<div id="fps"></div>
+<div id="nametag"></div>
+<div id="hotbar"></div>
+<button id="lockBtn">&#128274; Click to enable mouse-look</button>
+
+<div id="blocker">
+  <h1>&#9968; Voxel World</h1>
+  <p>An infinite procedurally generated world: biomes, villages, pyramids and wells, caves full of
+  ore veins, a bedrock floor so you can't fall into the void, real tool-tier mining, a crafting
+  table &amp; furnace, Creative mode with flight, day/night, save/load, and portals to the Nether
+  and the End. Click below to start.</p>
+  <button class="bigbtn" id="startbtn">Click to Play</button>
+</div>
+
+<div id="menu">
+  <div class="menu-box">
+    <h2>Paused</h2>
+    <div id="menuMsg"></div>
+    <div style="display:flex; gap:8px; justify-content:center; flex-wrap:wrap;">
+      <button class="bigbtn" id="resumeBtn">Resume</button>
+      <button class="bigbtn secondary" id="saveBtn">Save World</button>
+      <button class="bigbtn secondary" id="loadBtn">Load World</button>
+      <button class="bigbtn creative" id="creativeBtn">Toggle Creative</button>
+    </div>
+    <h3>Inventory</h3>
+    <div id="inventoryList"></div>
+    <div id="hotbarMirror"></div>
+    <h3>Crafting</h3>
+    <div id="craftList"></div>
+    <h3>Settings</h3>
+    <div id="settingsList">
+      <div class="settings-row">
+        <label for="nameInput">Name Tag</label>
+        <input type="text" id="nameInput" maxlength="16" value="Player">
+      </div>
+      <div class="settings-row">
+        <label for="renderDistInput">Render Distance <span id="renderDistVal">1</span></label>
+        <input type="range" id="renderDistInput" min="1" max="3" step="1" value="1">
+      </div>
+      <div class="settings-row">
+        <label for="resInput">Resolution <span id="resVal">75%</span></label>
+        <input type="range" id="resInput" min="0.5" max="1" step="0.05" value="0.75">
+      </div>
+      <div class="settings-row">
+        <label for="fovInput">Field of View <span id="fovVal">75</span></label>
+        <input type="range" id="fovInput" min="60" max="100" step="1" value="75">
+      </div>
+      <div class="settings-row">
+        <label for="sensInput">Mouse Sensitivity <span id="sensVal">1.0x</span></label>
+        <input type="range" id="sensInput" min="0.3" max="2" step="0.1" value="1">
+      </div>
+    </div>
+    <p style="opacity:0.7;font-size:12px;">Press E or Esc to resume</p>
+  </div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+(function(){
+"use strict";
+
+/* ============================== CONFIG ============================== */
+const CHUNK_SIZE = 24;
+let RENDER_DISTANCE = 1;
+let KEEP_DISTANCE = RENDER_DISTANCE + 2;
+const DEPTH = 14;
+let RESOLUTION_SCALE = 0.75; // render at this fraction of full resolution, upscaled to full size - big win on weak/integrated GPUs
+
+/* ============================== SETTINGS ============================== */
+let playerName = 'Player';
+let mouseSensitivity = 1.0;
+function applyRenderDistanceSetting(value){
+  RENDER_DISTANCE = value;
+  KEEP_DISTANCE = RENDER_DISTANCE + 2;
+  if(currentDim === 'overworld'){
+    scene.fog.near = 10;
+    scene.fog.far = RENDER_DISTANCE*CHUNK_SIZE - 4;
+  }
+  updateChunks();
+}
+function applyResolutionSetting(value){
+  RESOLUTION_SCALE = value;
+  applyRendererSize();
+}
+function applyFovSetting(value){
+  camera.fov = value;
+  camera.updateProjectionMatrix();
+}
+const WATER_LEVEL = 8;
+const BASE_HEIGHT = 10;
+const HEIGHT_RANGE = 9;
+const GRAVITY = 22;
+const JUMP_SPEED = 8.2;
+const WALK_SPEED = 5.2;
+const SPRINT_SPEED = 8.2;
+const FLY_SPEED = 9;
+const CREATIVE_MOVE_SPEED = 9.5;
+const EYE_HEIGHT = 1.62;
+const PLAYER_HALF_WIDTH = 0.3;
+const PLAYER_HEIGHT = 1.75;
+const REACH = 6;
+const CHUNK_UPDATE_INTERVAL = 0.35;
+const SAVE_KEY = 'voxelWorldSave';
+const NETHER_LAVA_LEVEL = 14;
+const END_ISLAND_RADIUS = 36;
+const CAVE_THRESHOLD = 0.66;
+
+/* ============================== DETERMINISTIC NOISE / RANDOM ============================== */
+function hash2(x, y){
+  const n = Math.sin(x*127.1 + y*311.7) * 43758.5453123;
+  return n - Math.floor(n);
+}
+function fade(t){ return t*t*t*(t*(t*6-15)+10); }
+function valueNoise(x, y){
+  const x0 = Math.floor(x), y0 = Math.floor(y);
+  const x1 = x0+1, y1 = y0+1;
+  const sx = fade(x-x0), sy = fade(y-y0);
+  const n00 = hash2(x0,y0), n10 = hash2(x1,y0), n01 = hash2(x0,y1), n11 = hash2(x1,y1);
+  const ix0 = n00 + (n10-n00)*sx;
+  const ix1 = n01 + (n11-n01)*sx;
+  return ix0 + (ix1-ix0)*sy;
+}
+function fractalNoise(x, y, octaves, persistence, scale){
+  let total=0, freq=scale, amp=1, maxAmp=0;
+  for(let i=0;i<octaves;i++){
+    total += valueNoise(x*freq, y*freq) * amp;
+    maxAmp += amp;
+    amp *= persistence;
+    freq *= 2;
+  }
+  return total/maxAmp;
+}
+function caveNoise3D(x,y,z){
+  const s = 0.09;
+  const a = valueNoise(x*s, y*s);
+  const b = valueNoise(y*s, z*s+50.5);
+  const c = valueNoise(x*s+90.2, z*s);
+  return (a+b+c)/3;
+}
+function terrainHeight(x, z){
+  const n = fractalNoise(x, z, 4, 0.5, 0.045);
+  return Math.floor(BASE_HEIGHT + n * HEIGHT_RANGE * 2 - HEIGHT_RANGE);
+}
+function biomeAt(x, z){
+  const n = fractalNoise(x+40000, z+40000, 3, 0.5, 0.01);
+  if(n < 0.28) return 'desert';
+  if(n < 0.55) return 'plains';
+  if(n < 0.8) return 'forest';
+  return 'snow';
+}
+function netherTerrainHeight(x, z){
+  const n = fractalNoise(x+20000, z+20000, 4, 0.5, 0.05);
+  return Math.floor(20 + n*16 - 8);
+}
+function endIslandMask(x, z){
+  if(Math.hypot(x,z) < END_ISLAND_RADIUS) return true;
+  const n = fractalNoise(x*0.6+5000, z*0.6+5000, 3, 0.55, 0.02);
+  return n > 0.58;
+}
+function endTerrainHeight(x, z){
+  return 34 + Math.floor(fractalNoise(x+7000, z+7000, 2, 0.5, 0.08)*3);
+}
+
+/* ============================== BLOCK TYPES ============================== */
+/* tier: pickaxe tier required to break in survival (0=hand, 1=wood, 2=stone, 3=iron, 4=diamond). Bedrock=999 (unbreakable). */
+const BLOCK_TYPES = {
+  grass:  { color: 0x63b34a, transparent:false, solid:true, tier:0 },
+  dirt:   { color: 0x8b5a2b, transparent:false, solid:true, tier:0 },
+  stone:  { color: 0x8a8a8e, transparent:false, solid:true, tier:1 },
+  cobblestone: { color: 0x7d7d7d, transparent:false, solid:true, tier:1 },
+  sand:   { color: 0xe3d18f, transparent:false, solid:true, tier:0 },
+  water:  { color: 0x3b6fd6, transparent:true,  opacity:0.65, solid:false },
+  wood:   { color: 0x6b4423, transparent:false, solid:true, tier:0 },
+  leaves: { color: 0x2e7d32, transparent:false, solid:true, tier:0 },
+  planks: { color: 0xc9a066, transparent:false, solid:true, tier:0 },
+  brick:  { color: 0xaa4a3a, transparent:false, solid:true, tier:0 },
+  glass:  { color: 0xbfe6f5, transparent:true,  opacity:0.35, solid:true, tier:0 },
+  snow:      { color: 0xf2f6f8, transparent:false, solid:true, tier:0 },
+  cactus:    { color: 0x3f8f52, transparent:false, solid:true, tier:0 },
+  sandstone: { color: 0xd8c27a, transparent:false, solid:true, tier:0 },
+  obsidian:  { color: 0x1b1030, transparent:false, solid:true, tier:3 },
+  netherrack:{ color: 0x6b2b2b, transparent:false, solid:true, tier:0 },
+  lava:      { color: 0xff6a1a, transparent:true, opacity:0.92, solid:false },
+  endstone:  { color: 0xdcdca6, transparent:false, solid:true, tier:0 },
+  portal_nether: { color: 0x9b30d9, transparent:true, opacity:0.75, solid:false },
+  portal_end:    { color: 0x1a0a2e, transparent:true, opacity:0.85, solid:false },
+  bedrock:   { color: 0x1a1a1a, transparent:false, solid:true, tier:999 },
+  coal_ore:     { color: 0x3a3a3a, transparent:false, solid:true, tier:1 },
+  iron_ore:     { color: 0xcbb89d, transparent:false, solid:true, tier:2 },
+  gold_ore:     { color: 0xe6c34d, transparent:false, solid:true, tier:2 },
+  redstone_ore: { color: 0xb5261a, transparent:false, solid:true, tier:2 },
+  lapis_ore:    { color: 0x2a4fae, transparent:false, solid:true, tier:2 },
+  diamond_ore:  { color: 0x6be3e0, transparent:false, solid:true, tier:3 },
+  crafting_table: { color: 0x8a5a2e, transparent:false, solid:true, tier:0 },
+  furnace:        { color: 0x707070, transparent:false, solid:true, tier:0 },
+  stone_bricks:   { color: 0x8f8f93, transparent:false, solid:true, tier:1 },
+  end_frame:      { color: 0x7fae8f, transparent:false, solid:true, tier:999 },
+  end_frame_eye:  { color: 0x7fae8f, transparent:false, solid:true, tier:999 },
+};
+/* blocks that drop a different item than themselves when mined in survival */
+const ORE_DROP_REMAP = { grass:'dirt', stone:'cobblestone', coal_ore:'coal', redstone_ore:'redstone', lapis_ore:'lapis', diamond_ore:'diamond' };
+
+const HOTBAR = ['grass','dirt','cobblestone','stone','stone_bricks','sand','sandstone','snow','wood','planks','leaves',
+  'cactus','glass','brick','obsidian','coal_ore','iron_ore','gold_ore','redstone_ore','lapis_ore',
+  'diamond_ore','crafting_table','furnace','flint_and_steel','eye_of_ender'];
+/* non-block items that also need inventory slots (raw materials, ingots, sticks, tools), no hotbar/placement */
+const EXTRA_ITEMS = [
+  'coal','redstone','lapis','diamond','stick','iron_ingot','gold_ingot','flint_and_steel',
+  'ender_pearl','blaze_powder','eye_of_ender',
+  'wood_pickaxe','stone_pickaxe','iron_pickaxe','diamond_pickaxe',
+  'wood_axe','stone_axe','iron_axe','diamond_axe',
+  'wood_shovel','stone_shovel','iron_shovel','diamond_shovel',
+  'wood_sword','stone_sword','iron_sword','diamond_sword'
+];
+const ALL_ITEMS = Array.from(new Set([...HOTBAR, ...EXTRA_ITEMS]));
+
+function toolRecipeSet(tool, cost){
+  return [
+    { inputs:{ stick:2, planks:cost },      outputs:{ ['wood_'+tool]:1 },    requires:'table', label:'Wood '+labelize(tool) },
+    { inputs:{ stick:2, cobblestone:cost }, outputs:{ ['stone_'+tool]:1 },   requires:'table', label:'Stone '+labelize(tool) },
+    { inputs:{ stick:2, iron_ingot:cost },  outputs:{ ['iron_'+tool]:1 },    requires:'table', label:'Iron '+labelize(tool) },
+    { inputs:{ stick:2, diamond:cost },     outputs:{ ['diamond_'+tool]:1 }, requires:'table', label:'Diamond '+labelize(tool) },
+  ];
+}
+function labelize(name){
+  return name.split('_').map(w => w.charAt(0).toUpperCase()+w.slice(1)).join(' ');
+}
+
+const RECIPES = [
+  { inputs:{ wood:1 },  outputs:{ planks:4 },  requires:null,  label:'Wood \u2192 Planks' },
+  { inputs:{ planks:1 },outputs:{ stick:2 },    requires:null,  label:'Planks \u2192 Sticks' },
+  { inputs:{ planks:4 },outputs:{ crafting_table:1 }, requires:null, label:'Planks \u2192 Crafting Table' },
+
+  ...toolRecipeSet('pickaxe', 3),
+  ...toolRecipeSet('axe', 3),
+  { inputs:{ stick:2, planks:1 },      outputs:{ wood_shovel:1 },    requires:'table', label:'Wood Shovel' },
+  { inputs:{ stick:2, cobblestone:1 }, outputs:{ stone_shovel:1 },   requires:'table', label:'Stone Shovel' },
+  { inputs:{ stick:2, iron_ingot:1 },  outputs:{ iron_shovel:1 },    requires:'table', label:'Iron Shovel' },
+  { inputs:{ stick:2, diamond:1 },     outputs:{ diamond_shovel:1 }, requires:'table', label:'Diamond Shovel' },
+  { inputs:{ stick:1, planks:2 },      outputs:{ wood_sword:1 },    requires:'table', label:'Wood Sword' },
+  { inputs:{ stick:1, cobblestone:2 }, outputs:{ stone_sword:1 },   requires:'table', label:'Stone Sword' },
+  { inputs:{ stick:1, iron_ingot:2 },  outputs:{ iron_sword:1 },    requires:'table', label:'Iron Sword' },
+  { inputs:{ stick:1, diamond:2 },     outputs:{ diamond_sword:1 }, requires:'table', label:'Diamond Sword' },
+  { inputs:{ cobblestone:8 },          outputs:{ furnace:1 },         requires:'table', label:'Furnace' },
+  { inputs:{ stone:4 },                outputs:{ brick:1 },           requires:'table', label:'Stone \u2192 Brick' },
+  { inputs:{ cobblestone:4 },          outputs:{ stone_bricks:4 },    requires:'table', label:'Stone Bricks' },
+  { inputs:{ iron_ingot:1, stick:1 },  outputs:{ flint_and_steel:1 }, requires:'table', label:'Flint and Steel' },
+  { inputs:{ ender_pearl:1, blaze_powder:1 }, outputs:{ eye_of_ender:1 }, requires:'table', label:'Eye of Ender' },
+
+  { inputs:{ iron_ore:1 },    outputs:{ iron_ingot:1 }, requires:'furnace', label:'Smelt Iron Ore' },
+  { inputs:{ gold_ore:1 },    outputs:{ gold_ingot:1 }, requires:'furnace', label:'Smelt Gold Ore' },
+  { inputs:{ sand:2 },        outputs:{ glass:1 },      requires:'furnace', label:'Smelt Glass' },
+  { inputs:{ cobblestone:1 }, outputs:{ stone:1 },      requires:'furnace', label:'Smelt Stone' },
+];
+const TOOL_TIER = { wood_pickaxe:1, stone_pickaxe:2, iron_pickaxe:3, diamond_pickaxe:4 };
+
+/* ============================== SCENE SETUP ============================== */
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x87ceeb);
+scene.fog = new THREE.Fog(0x87ceeb, 10, RENDER_DISTANCE*CHUNK_SIZE - 4);
+
+const camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 300);
+
+const renderer = new THREE.WebGLRenderer({ antialias:false, powerPreference:'high-performance' });
+renderer.setPixelRatio(1);
+function applyRendererSize(){
+  const w = window.innerWidth, h = window.innerHeight;
+  renderer.setSize(w*RESOLUTION_SCALE, h*RESOLUTION_SCALE, false);
+  renderer.domElement.style.width = w + 'px';
+  renderer.domElement.style.height = h + 'px';
+  camera.aspect = w / h;
+  camera.updateProjectionMatrix();
+}
+applyRendererSize();
+document.body.appendChild(renderer.domElement);
+
+const sun = new THREE.DirectionalLight(0xffffff, 1.0);
+sun.position.set(50, 80, 20);
+scene.add(sun);
+const ambient = new THREE.AmbientLight(0xffffff, 0.35);
+scene.add(ambient);
+
+window.addEventListener('resize', applyRendererSize);
+
+/* ============================== SHARED GEOMETRY / MATERIALS ============================== */
+const boxGeometry = new THREE.BoxGeometry(1,1,1);
+const dummy = new THREE.Object3D();
+const zeroMatrix = new THREE.Matrix4().makeScale(0,0,0);
+
+/* Original procedural pixel textures - generated at runtime, not copied from any game's assets. */
+function makeNoiseTexture(hexColor, variance, size){
+  size = size || 16;
+  const canvas = document.createElement('canvas');
+  canvas.width = size; canvas.height = size;
+  const ctx = canvas.getContext('2d');
+  const base = new THREE.Color(hexColor);
+  const br = base.r*255, bg = base.g*255, bb = base.b*255;
+  for(let y=0;y<size;y++){
+    for(let x=0;x<size;x++){
+      const n = (Math.random()-0.5) * variance * 255;
+      const r = Math.min(255, Math.max(0, Math.round(br+n)));
+      const g = Math.min(255, Math.max(0, Math.round(bg+n)));
+      const b = Math.min(255, Math.max(0, Math.round(bb+n)));
+      ctx.fillStyle = 'rgb('+r+','+g+','+b+')';
+      ctx.fillRect(x,y,1,1);
+    }
+  }
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.magFilter = THREE.NearestFilter;
+  tex.minFilter = THREE.NearestFilter;
+  tex.generateMipmaps = false;
+  return tex;
+}
+function makeGrassSideTexture(size){
+  size = size || 16;
+  const canvas = document.createElement('canvas');
+  canvas.width = size; canvas.height = size;
+  const ctx = canvas.getContext('2d');
+  const grassC = new THREE.Color(BLOCK_TYPES.grass.color);
+  const dirtC = new THREE.Color(BLOCK_TYPES.dirt.color);
+  const splitY = Math.round(size*0.3);
+  for(let y=0;y<size;y++){
+    const inGrassBand = y < splitY;
+    const base = inGrassBand ? grassC : dirtC;
+    const variance = inGrassBand ? 0.16 : 0.16;
+    for(let x=0;x<size;x++){
+      const n = (Math.random()-0.5) * variance * 255;
+      const r = Math.min(255, Math.max(0, Math.round(base.r*255+n)));
+      const g = Math.min(255, Math.max(0, Math.round(base.g*255+n)));
+      const b = Math.min(255, Math.max(0, Math.round(base.b*255+n)));
+      ctx.fillStyle = 'rgb('+r+','+g+','+b+')';
+      ctx.fillRect(x,y,1,1);
+    }
+  }
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.magFilter = THREE.NearestFilter;
+  tex.minFilter = THREE.NearestFilter;
+  tex.generateMipmaps = false;
+  return tex;
+}
+function makeWaterTexture(size){
+  size = size || 16;
+  const canvas = document.createElement('canvas');
+  canvas.width = size; canvas.height = size;
+  const ctx = canvas.getContext('2d');
+  const base = new THREE.Color(BLOCK_TYPES.water.color);
+  for(let y=0;y<size;y++){
+    for(let x=0;x<size;x++){
+      const wave = Math.sin((x+y*0.5)*0.9)*0.5+0.5;
+      const n = (Math.random()-0.5)*0.08;
+      const light = wave*0.22 + n;
+      const r = Math.min(255,Math.max(0, Math.round(base.r*255*(1+light))));
+      const g = Math.min(255,Math.max(0, Math.round(base.g*255*(1+light))));
+      const b = Math.min(255,Math.max(0, Math.round(base.b*255*(1+light*0.6))));
+      ctx.fillStyle = 'rgb('+r+','+g+','+b+')';
+      ctx.fillRect(x,y,1,1);
+    }
+  }
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.magFilter = THREE.NearestFilter; tex.minFilter = THREE.NearestFilter; tex.generateMipmaps = false;
+  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+  return tex;
+}
+function makeLavaTexture(size){
+  size = size || 16;
+  const canvas = document.createElement('canvas');
+  canvas.width = size; canvas.height = size;
+  const ctx = canvas.getContext('2d');
+  const base = new THREE.Color(BLOCK_TYPES.lava.color);
+  const glow = new THREE.Color(0xffdd55);
+  for(let y=0;y<size;y++){
+    for(let x=0;x<size;x++){
+      const blobs = Math.sin(x*0.8+Math.sin(y*0.6)*2)*0.5+0.5;
+      const c = blobs > 0.72 ? glow : base;
+      const n = (Math.random()-0.5)*0.14;
+      const r = Math.min(255,Math.max(0, Math.round(c.r*255+n*255)));
+      const g = Math.min(255,Math.max(0, Math.round(c.g*255+n*255)));
+      const b = Math.min(255,Math.max(0, Math.round(c.b*255+n*255)));
+      ctx.fillStyle = 'rgb('+r+','+g+','+b+')';
+      ctx.fillRect(x,y,1,1);
+    }
+  }
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.magFilter = THREE.NearestFilter; tex.minFilter = THREE.NearestFilter; tex.generateMipmaps = false;
+  return tex;
+}
+function makeGlassTexture(size){
+  size = size || 16;
+  const canvas = document.createElement('canvas');
+  canvas.width = size; canvas.height = size;
+  const ctx = canvas.getContext('2d');
+  const base = new THREE.Color(BLOCK_TYPES.glass.color);
+  ctx.fillStyle = 'rgba('+Math.round(base.r*255)+','+Math.round(base.g*255)+','+Math.round(base.b*255)+',0.5)';
+  ctx.fillRect(0,0,size,size);
+  ctx.strokeStyle = 'rgba(255,255,255,0.55)';
+  ctx.lineWidth = 1;
+  ctx.strokeRect(0.5,0.5,size-1,size-1);
+  ctx.strokeStyle = 'rgba(255,255,255,0.3)';
+  ctx.beginPath(); ctx.moveTo(2,size-2); ctx.lineTo(size-4,2); ctx.stroke();
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.magFilter = THREE.NearestFilter; tex.minFilter = THREE.NearestFilter; tex.generateMipmaps = false;
+  return tex;
+}
+function makePortalTexture(hexA, hexB, size){
+  size = size || 16;
+  const canvas = document.createElement('canvas');
+  canvas.width = size; canvas.height = size;
+  const ctx = canvas.getContext('2d');
+  const cA = new THREE.Color(hexA), cB = new THREE.Color(hexB);
+  for(let y=0;y<size;y++){
+    for(let x=0;x<size;x++){
+      const t = Math.sin(x*0.9+y*1.3)*0.5+0.5;
+      const n = Math.random()*0.25;
+      const mix = Math.min(1, Math.max(0, t+n-0.1));
+      const r = Math.round(cA.r*255*(1-mix)+cB.r*255*mix);
+      const g = Math.round(cA.g*255*(1-mix)+cB.g*255*mix);
+      const b = Math.round(cA.b*255*(1-mix)+cB.b*255*mix);
+      ctx.fillStyle = 'rgb('+r+','+g+','+b+')';
+      ctx.fillRect(x,y,1,1);
+    }
+  }
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.magFilter = THREE.NearestFilter; tex.minFilter = THREE.NearestFilter; tex.generateMipmaps = false;
+  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+  return tex;
+}
+function makeEndFrameSideTexture(size){
+  size = size || 16;
+  const canvas = document.createElement('canvas');
+  canvas.width = size; canvas.height = size;
+  const ctx = canvas.getContext('2d');
+  const base = new THREE.Color(BLOCK_TYPES.end_frame.color);
+  for(let y=0;y<size;y++){
+    for(let x=0;x<size;x++){
+      const n = (Math.random()-0.5) * 0.12 * 255;
+      const r = Math.min(255,Math.max(0, Math.round(base.r*255+n)));
+      const g = Math.min(255,Math.max(0, Math.round(base.g*255+n)));
+      const b = Math.min(255,Math.max(0, Math.round(base.b*255+n)));
+      ctx.fillStyle = 'rgb('+r+','+g+','+b+')';
+      ctx.fillRect(x,y,1,1);
+    }
+  }
+  ctx.strokeStyle = 'rgba(0,0,0,0.25)';
+  ctx.strokeRect(0.5,0.5,size-1,size-1);
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.magFilter = THREE.NearestFilter; tex.minFilter = THREE.NearestFilter; tex.generateMipmaps = false;
+  return tex;
+}
+function makeEndFrameTopTexture(hasEye, size){
+  size = size || 16;
+  const canvas = document.createElement('canvas');
+  canvas.width = size; canvas.height = size;
+  const ctx = canvas.getContext('2d');
+  const base = new THREE.Color(BLOCK_TYPES.end_frame.color);
+  for(let y=0;y<size;y++){
+    for(let x=0;x<size;x++){
+      const n = (Math.random()-0.5) * 0.1 * 255;
+      const r = Math.min(255,Math.max(0, Math.round(base.r*255+n)));
+      const g = Math.min(255,Math.max(0, Math.round(base.g*255+n)));
+      const b = Math.min(255,Math.max(0, Math.round(base.b*255+n)));
+      ctx.fillStyle = 'rgb('+r+','+g+','+b+')';
+      ctx.fillRect(x,y,1,1);
+    }
+  }
+  const inset = 3;
+  ctx.fillStyle = 'rgba(0,0,0,0.35)';
+  ctx.fillRect(inset, inset, size-inset*2, size-inset*2);
+  if(hasEye){
+    const cx = size/2, cy = size/2;
+    const grad = ctx.createRadialGradient(cx,cy,1,cx,cy,size/2-inset);
+    grad.addColorStop(0, '#0a2e22');
+    grad.addColorStop(0.55, '#1fae7a');
+    grad.addColorStop(0.85, '#7ef2c9');
+    grad.addColorStop(1, '#0a2e22');
+    ctx.fillStyle = grad;
+    ctx.beginPath();
+    ctx.arc(cx, cy, size/2-inset-1, 0, Math.PI*2);
+    ctx.fill();
+    ctx.fillStyle = '#05130f';
+    ctx.fillRect(cx-1, cy-size/2+inset+2, 2, size-inset*2-4);
+    ctx.fillStyle = 'rgba(255,255,255,0.6)';
+    ctx.fillRect(cx-3, cy-3, 2, 2);
+  } else {
+    ctx.fillStyle = 'rgba(0,0,0,0.5)';
+    ctx.fillRect(inset+2, inset+2, size-inset*2-4, size-inset*2-4);
+  }
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.magFilter = THREE.NearestFilter; tex.minFilter = THREE.NearestFilter; tex.generateMipmaps = false;
+  return tex;
+}
+const NOISE_VARIANCE = {
+  dirt:0.18, stone:0.13, cobblestone:0.16, sand:0.09, sandstone:0.09, snow:0.05,
+  wood:0.12, planks:0.09, leaves:0.2, brick:0.15, cactus:0.12,
+  obsidian:0.22, netherrack:0.18, endstone:0.11, bedrock:0.24,
+  coal_ore:0.2, iron_ore:0.15, gold_ore:0.13, redstone_ore:0.15, lapis_ore:0.13, diamond_ore:0.11,
+  crafting_table:0.14, furnace:0.11, stone_bricks:0.1
+};
+let portalNetherTexture = null, portalEndTexture = null;
+const globalMaterials = {};
+for(const type in BLOCK_TYPES){
+  const def = BLOCK_TYPES[type];
+  if(type === 'grass' || type === 'end_frame' || type === 'end_frame_eye') continue; // handled separately below (need distinct per-face textures)
+  if(def.transparent){
+    let map = null;
+    if(type === 'water') map = makeWaterTexture();
+    else if(type === 'lava') map = makeLavaTexture();
+    else if(type === 'glass') map = makeGlassTexture();
+    else if(type === 'portal_nether'){ portalNetherTexture = makePortalTexture(0xb14bff, 0x2a0a3a); map = portalNetherTexture; }
+    else if(type === 'portal_end'){ portalEndTexture = makePortalTexture(0x1a0a2e, 0x5a2e8e); map = portalEndTexture; }
+    const matOpts = { transparent:true, opacity: def.opacity !== undefined ? def.opacity : 1, depthWrite:false };
+    if(map) matOpts.map = map; else matOpts.color = def.color;
+    globalMaterials[type] = new THREE.MeshLambertMaterial(matOpts);
+  } else {
+    const variance = NOISE_VARIANCE[type] !== undefined ? NOISE_VARIANCE[type] : 0.1;
+    globalMaterials[type] = new THREE.MeshLambertMaterial({ map: makeNoiseTexture(def.color, variance) });
+  }
+}
+{
+  const grassTopMat = new THREE.MeshLambertMaterial({ map: makeNoiseTexture(BLOCK_TYPES.grass.color, 0.14) });
+  const grassSideMat = new THREE.MeshLambertMaterial({ map: makeGrassSideTexture() });
+  const grassBottomMat = new THREE.MeshLambertMaterial({ map: makeNoiseTexture(BLOCK_TYPES.dirt.color, 0.18) });
+  /* BoxGeometry face group order: [+x, -x, +y, -y, +z, -z] -> side,side,top,bottom,side,side */
+  globalMaterials.grass = [grassSideMat, grassSideMat, grassTopMat, grassBottomMat, grassSideMat, grassSideMat];
+}
+{
+  const frameSideMat = new THREE.MeshLambertMaterial({ map: makeEndFrameSideTexture() });
+  const frameBottomMat = new THREE.MeshLambertMaterial({ map: makeNoiseTexture(BLOCK_TYPES.end_frame.color, 0.16) });
+  const emptyTopMat = new THREE.MeshLambertMaterial({ map: makeEndFrameTopTexture(false) });
+  const eyeTopMat = new THREE.MeshLambertMaterial({ map: makeEndFrameTopTexture(true) });
+  globalMaterials.end_frame = [frameSideMat, frameSideMat, emptyTopMat, frameBottomMat, frameSideMat, frameSideMat];
+  globalMaterials.end_frame_eye = [frameSideMat, frameSideMat, eyeTopMat, frameBottomMat, frameSideMat, frameSideMat];
+}
+
+function key(x,y,z){ return x+','+y+','+z; }
+function chunkKey(cx,cz){ return cx+','+cz; }
+function worldToChunk(x,z){ return { cx: Math.floor(x/CHUNK_SIZE), cz: Math.floor(z/CHUNK_SIZE) }; }
+
+/* ============================== DIMENSIONS ============================== */
+function makeDimState(){
+  return { chunks:new Map(), edits:new Map(), worldGroup:new THREE.Group() };
+}
+const dimState = { overworld: makeDimState(), nether: makeDimState(), end: makeDimState() };
+let currentDim = 'overworld';
+scene.add(dimState.overworld.worldGroup);
+function dim(){ return dimState[currentDim]; }
+
+/* ============================== CHUNK SYSTEM (operates on the CURRENT dimension) ============================== */
+function getChunkAt(x,z){
+  const { cx, cz } = worldToChunk(x,z);
+  return dim().chunks.get(chunkKey(cx,cz));
+}
+function getBlock(x,y,z){
+  const c = getChunkAt(x,z);
+  if(!c) return null;
+  return c.blocks.get(key(x,y,z)) || null;
+}
+function isSolid(x,y,z){
+  const b = getBlock(x,y,z);
+  return b ? BLOCK_TYPES[b.type].solid : false;
+}
+
+function createChunkMesh(chunk, type, capacity){
+  const mesh = new THREE.InstancedMesh(boxGeometry, globalMaterials[type], Math.max(capacity,8));
+  mesh.count = 0;
+  mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+  mesh.frustumCulled = false;
+  chunk.group.add(mesh);
+  const entry = { mesh, nextIndex:0, freeList:[] };
+  chunk.meshes[type] = entry;
+  return entry;
+}
+function growChunkMesh(chunk, type){
+  const old = chunk.meshes[type];
+  const newCap = old.mesh.instanceMatrix.count * 2;
+  const newMesh = new THREE.InstancedMesh(boxGeometry, globalMaterials[type], newCap);
+  newMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+  newMesh.frustumCulled = false;
+  newMesh.instanceMatrix.array.set(old.mesh.instanceMatrix.array.subarray(0, old.nextIndex*16));
+  newMesh.count = old.mesh.count;
+  chunk.group.remove(old.mesh);
+  chunk.group.add(newMesh);
+  const entry = { mesh:newMesh, nextIndex: old.nextIndex, freeList: old.freeList.slice() };
+  chunk.meshes[type] = entry;
+  return entry;
+}
+
+const NEIGHBOR_OFFSETS = [[1,0,0],[-1,0,0],[0,1,0],[0,-1,0],[0,0,1],[0,0,-1]];
+function isExposed(naturalMap, x, y, z){
+  for(const [dx,dy,dz] of NEIGHBOR_OFFSETS){
+    const ntype = naturalMap.get(key(x+dx, y+dy, z+dz));
+    if(ntype === undefined) return true;       // neighbor is air, or in a not-yet-generated chunk - treat as exposed (safe/conservative)
+    if(!BLOCK_TYPES[ntype].solid) return true; // neighbor is water/lava/portal etc - exposed
+  }
+  return false; // fully enclosed by solid blocks on all 6 sides - never visible, skip instancing it
+}
+
+function materializeChunk(chunk, naturalMap){
+  const byType = {};
+  for(const [k,type] of naturalMap){
+    const parts = k.split(',');
+    const x = parseInt(parts[0]), y = parseInt(parts[1]), z = parseInt(parts[2]);
+    if(BLOCK_TYPES[type].solid && !isExposed(naturalMap, x, y, z)){
+      chunk.blocks.set(k, { type, idx: null }); // buried - tracked for collision/mining, not rendered
+      continue;
+    }
+    (byType[type] || (byType[type]=[])).push(k);
+  }
+  for(const type in byType){
+    const list = byType[type];
+    const entry = createChunkMesh(chunk, type, list.length + 48);
+    for(const k of list){
+      const parts = k.split(',');
+      const x = parseInt(parts[0]), y = parseInt(parts[1]), z = parseInt(parts[2]);
+      dummy.position.set(x+0.5, y+0.5, z+0.5);
+      dummy.rotation.set(0,0,0); dummy.scale.set(1,1,1);
+      dummy.updateMatrix();
+      entry.mesh.setMatrixAt(entry.nextIndex, dummy.matrix);
+      chunk.blocks.set(k, { type, idx: entry.nextIndex });
+      entry.nextIndex++;
+    }
+    entry.mesh.count = entry.nextIndex;
+    entry.mesh.instanceMatrix.needsUpdate = true;
+  }
+}
+
+function applyEditsOverlay(natural, cx, cz){
+  for(const [k, type] of dim().edits){
+    const parts = k.split(',');
+    const ex = parseInt(parts[0]), ez = parseInt(parts[2]);
+    const { cx:ecx, cz:ecz } = worldToChunk(ex, ez);
+    if(ecx === cx && ecz === cz){
+      if(type === null) natural.delete(k);
+      else natural.set(k, type);
+    }
+  }
+}
+function finishChunk(chunk, natural, cx, cz){
+  applyEditsOverlay(natural, cx, cz);
+  materializeChunk(chunk, natural);
+  dim().worldGroup.add(chunk.group);
+  dim().chunks.set(chunkKey(cx,cz), chunk);
+  return chunk;
+}
+
+/* ---- structures (village houses, desert pyramids, wells), overworld only ---- */
+function buildHouse(natural, footprint, wx0, wz0, h){
+  const W = 6;
+  for(let dx=0; dx<W; dx++){
+    for(let dz=0; dz<W; dz++){
+      footprint.add((wx0+dx)+','+(wz0+dz));
+      natural.set(key(wx0+dx, h+1, wz0+dz), 'planks');
+    }
+  }
+  for(let dy=2; dy<=4; dy++){
+    for(let dx=0; dx<W; dx++){
+      for(let dz=0; dz<W; dz++){
+        const edge = dx===0 || dx===W-1 || dz===0 || dz===W-1;
+        if(!edge) continue;
+        const isDoor = dz===0 && (dx===2||dx===3) && dy<=3;
+        if(isDoor) continue;
+        const isWindow = dy===3 && ((dx===0&&dz===3)||(dx===W-1&&dz===3)||(dz===W-1&&dx===3));
+        natural.set(key(wx0+dx, h+dy, wz0+dz), isWindow ? 'glass' : 'planks');
+      }
+    }
+  }
+  for(let dx=-1; dx<=W; dx++){
+    for(let dz=-1; dz<=W; dz++){
+      natural.set(key(wx0+dx, h+5, wz0+dz), 'brick');
+    }
+  }
+}
+function buildPyramid(natural, footprint, wx0, wz0, h){
+  const layers = 4;
+  for(let layer=0; layer<layers; layer++){
+    const size = 9 - layer*2;
+    if(size <= 0) break;
+    for(let dx=0; dx<size; dx++){
+      for(let dz=0; dz<size; dz++){
+        footprint.add((wx0+dx-layer)+','+(wz0+dz-layer));
+        natural.set(key(wx0+dx-layer, h+1+layer, wz0+dz-layer), 'sandstone');
+      }
+    }
+  }
+}
+function buildWell(natural, footprint, wx0, wz0, h){
+  const R = 2;
+  for(let dx=-R; dx<=R; dx++){
+    for(let dz=-R; dz<=R; dz++){
+      if(Math.abs(dx)+Math.abs(dz) > R+1) continue;
+      footprint.add((wx0+dx)+','+(wz0+dz));
+      const isRing = Math.abs(dx)===R || Math.abs(dz)===R || (Math.abs(dx)+Math.abs(dz))===R+1;
+      if(isRing){
+        for(let dy=0; dy<=2; dy++) natural.set(key(wx0+dx, h+1+dy, wz0+dz), 'cobblestone');
+      } else {
+        natural.set(key(wx0+dx, h, wz0+dz), 'water');
+        natural.delete(key(wx0+dx, h+1, wz0+dz));
+      }
+    }
+  }
+}
+
+/* ---- overworld portal hub, built once inside chunk (0,0) ---- */
+const PORTAL_ANCHOR_H = terrainHeight(2,2);
+const OW_NETHER_ARRIVAL = new THREE.Vector3(2.5, PORTAL_ANCHOR_H+1, 7.5);
+const OW_END_ARRIVAL    = new THREE.Vector3(13.5, PORTAL_ANCHOR_H+1, 7.5);
+
+/* ---- the Overworld's End Portal: a real 5x5 frame (12 sockets, corners open) around a 3x3
+   center, matching the actual game's stronghold portal. Insert an Eye of Ender into every
+   socket to activate it. ---- */
+const END_HUB_ANCHOR = { x: 13, z: 7 };
+const END_HUB_FRAME_CELLS = [];
+const END_HUB_CENTER_CELLS = [];
+for(let dx=-2; dx<=2; dx++){
+  for(let dz=-2; dz<=2; dz++){
+    const isCenter = dx>=-1 && dx<=1 && dz>=-1 && dz<=1;
+    const isCorner = Math.abs(dx)===2 && Math.abs(dz)===2;
+    const x = END_HUB_ANCHOR.x+dx, z = END_HUB_ANCHOR.z+dz;
+    const k = key(x, PORTAL_ANCHOR_H+1, z);
+    if(isCenter) END_HUB_CENTER_CELLS.push(k);
+    else if(!isCorner) END_HUB_FRAME_CELLS.push(k);
+  }
+}
+
+function flattenArea(natural, x0, x1, z0, z1, groundY, groundType){
+  for(let x=x0;x<=x1;x++){
+    for(let z=z0;z<=z1;z++){
+      for(let y=groundY+1; y<=groundY+8; y++) natural.delete(key(x,y,z));
+      natural.set(key(x,groundY,z), groundType || 'stone');
+    }
+  }
+}
+function buildNetherPortalFrame(natural, bx, by, bz){
+  for(let dy=-1; dy<=3; dy++){
+    for(let dx=-1; dx<=2; dx++){
+      const isFrame = dx===-1 || dx===2 || dy===-1 || dy===3;
+      const k = key(bx+dx, by+dy, bz);
+      if(isFrame) natural.set(k, 'obsidian');
+      else natural.delete(k); // interior stays empty air - light it with flint and steel
+    }
+  }
+}
+function buildEndPortalFrame(natural, bx, by, bz){
+  for(let dx=-1; dx<=1; dx++){
+    for(let dz=-1; dz<=1; dz++){
+      natural.set(key(bx+dx, by-1, bz+dz), 'obsidian');
+    }
+  }
+  natural.set(key(bx, by, bz), 'portal_end');
+}
+function buildOverworldPortals(natural){
+  flattenArea(natural, 0, 6, 4, 8, PORTAL_ANCHOR_H, 'stone');
+  buildNetherPortalFrame(natural, 2, PORTAL_ANCHOR_H+1, 5);
+
+  flattenArea(natural, 9, 17, 3, 11, PORTAL_ANCHOR_H, 'stone');
+  for(const k of END_HUB_FRAME_CELLS) natural.set(k, 'end_frame');
+  // center cells are left as empty air - they become portal_end once every socket has an eye
+}
+
+const NETHER_ANCHOR_H = netherTerrainHeight(2,2);
+const NETHER_ARRIVAL = new THREE.Vector3(2.5, NETHER_ANCHOR_H+1, 7.5);
+function buildNetherReturnPortal(natural){
+  flattenArea(natural, 0, 6, 4, 8, NETHER_ANCHOR_H, 'netherrack');
+  buildNetherPortalFrame(natural, 2, NETHER_ANCHOR_H+1, 5);
+}
+
+const END_ANCHOR_H = endTerrainHeight(2,2);
+const END_ARRIVAL = new THREE.Vector3(2.5, END_ANCHOR_H+1, 7.5);
+function buildEndReturnPortal(natural){
+  flattenArea(natural, 0, 6, 4, 8, END_ANCHOR_H, 'endstone');
+  buildEndPortalFrame(natural, 2, END_ANCHOR_H+1, 6);
+}
+
+/* ---- inserting an Eye of Ender into a frame socket, and checking whether the whole ring is now complete ---- */
+function insertEyeOfEnder(x,y,z){
+  removeBlockLive(x,y,z);
+  addBlockLive(x,y,z, 'end_frame_eye');
+  checkEndPortalCompletion();
+}
+function checkEndPortalCompletion(){
+  const allFilled = END_HUB_FRAME_CELLS.every(k=>{
+    const parts = k.split(',');
+    const b = getBlock(parseInt(parts[0]), parseInt(parts[1]), parseInt(parts[2]));
+    return b && b.type === 'end_frame_eye';
+  });
+  if(!allFilled) return;
+  for(const k of END_HUB_CENTER_CELLS){
+    const parts = k.split(',');
+    addBlockLive(parseInt(parts[0]), parseInt(parts[1]), parseInt(parts[2]), 'portal_end');
+  }
+  showToast('The End Portal awakens!');
+}
+
+/* ---- lighting a Nether portal: flood-fill the empty space the player is pointing at; if it's
+   fully enclosed by obsidian within a single plane (either the XY or ZY plane), it's a valid
+   frame and gets filled with lit portal blocks. Works for the pre-built hub frame AND any frame
+   the player builds themselves out of mined obsidian. ---- */
+function inPlaneNeighbors(axis){
+  return axis === 'x' ? [[1,0,0],[-1,0,0],[0,1,0],[0,-1,0]] : [[0,0,1],[0,0,-1],[0,1,0],[0,-1,0]];
+}
+function floodFillPortalInterior(sx,sy,sz,axis){
+  if(getBlock(sx,sy,sz) !== null) return null; // must start on empty air
+  const dirs = inPlaneNeighbors(axis);
+  const startKey = key(sx,sy,sz);
+  const visited = new Set([startKey]);
+  const cells = [startKey];
+  const stack = [[sx,sy,sz]];
+  const MAX_CELLS = 15;
+  while(stack.length){
+    const [cx,cy,cz] = stack.pop();
+    for(const [dx,dy,dz] of dirs){
+      const nx=cx+dx, ny=cy+dy, nz=cz+dz;
+      const nk = key(nx,ny,nz);
+      if(visited.has(nk)) continue;
+      visited.add(nk);
+      const nb = getBlock(nx,ny,nz);
+      if(nb === null){
+        cells.push(nk);
+        if(cells.length > MAX_CELLS) return null;
+        stack.push([nx,ny,nz]);
+      } else if(!BLOCK_TYPES[nb.type].solid){
+        return null; // water/lava/another portal touching it - not a clean frame
+      } else if(nb.type !== 'obsidian'){
+        return null; // boundary must be obsidian
+      }
+    }
+  }
+  if(cells.length < 2) return null;
+  return cells;
+}
+function tryLightPortal(x, y, z){
+  for(const axis of ['x','z']){
+    const cells = floodFillPortalInterior(x,y,z,axis);
+    if(cells){
+      for(const k of cells){
+        const parts = k.split(',');
+        addBlockLive(parseInt(parts[0]), parseInt(parts[1]), parseInt(parts[2]), 'portal_nether');
+      }
+      return true;
+    }
+  }
+  return false;
+}
+
+/* ============================== GENERATION: OVERWORLD ============================== */
+function generateOverworldChunk(cx, cz){
+  const chunk = { cx, cz, blocks:new Map(), meshes:{}, group:new THREE.Group(), loaded:true };
+  const natural = new Map();
+  const footprint = new Set();
+  const biomeCol = {};
+
+  for(let lx=0; lx<CHUNK_SIZE; lx++){
+    for(let lz=0; lz<CHUNK_SIZE; lz++){
+      const wx = cx*CHUNK_SIZE+lx, wz = cz*CHUNK_SIZE+lz;
+      const h = terrainHeight(wx,wz);
+      const biome = biomeAt(wx,wz);
+      biomeCol[lx+','+lz] = biome;
+      const bottom = h - DEPTH;
+      const beach = h <= WATER_LEVEL+1;
+      for(let y=bottom; y<=h; y++){
+        let type;
+        if(y === bottom){
+          type = 'bedrock';
+        } else if(y === h){
+          type = beach ? 'sand' : (biome==='desert' ? 'sand' : biome==='snow' ? 'snow' : 'grass');
+        } else if(y > h-4){
+          type = beach ? 'sand' : (biome==='desert' ? 'sandstone' : 'dirt');
+        } else {
+          const d = h - y;
+          if(y > bottom+1 && caveNoise3D(wx,y,wz) > CAVE_THRESHOLD){
+            type = null; // carved out - leave as air
+          } else if(d>=6 && hash2(wx*0.7+1001, y*0.31+wz*0.13+11) < 0.0006){
+            type = 'diamond_ore';
+          } else if(d>=4 && hash2(wx*0.6+2002, y*0.29+wz*0.11+22) < 0.0015){
+            type = 'lapis_ore';
+          } else if(d>=5 && hash2(wx*0.55+3003, y*0.27+wz*0.09+33) < 0.0018){
+            type = 'redstone_ore';
+          } else if(d>=4 && hash2(wx*0.5+4004, y*0.25+wz*0.07+44) < 0.0025){
+            type = 'gold_ore';
+          } else if(d>=2 && hash2(wx*0.45+5005, y*0.23+wz*0.05+55) < 0.006){
+            type = 'iron_ore';
+          } else if(d>=1 && hash2(wx*0.4+6006, y*0.21+wz*0.03+66) < 0.012){
+            type = 'coal_ore';
+          } else {
+            type = 'stone';
+          }
+        }
+        if(type) natural.set(key(wx,y,wz), type);
+      }
+      if(h < WATER_LEVEL){
+        for(let y=h+1; y<=WATER_LEVEL; y++) natural.set(key(wx,y,wz), 'water');
+      }
+    }
+  }
+
+  // structures - kept off chunk edges, one attempt per column
+  for(let lx=6; lx<CHUNK_SIZE-10; lx++){
+    for(let lz=6; lz<CHUNK_SIZE-10; lz++){
+      if(footprint.has((cx*CHUNK_SIZE+lx)+','+(cz*CHUNK_SIZE+lz))) continue;
+      const wx = cx*CHUNK_SIZE+lx, wz = cz*CHUNK_SIZE+lz;
+      const h = terrainHeight(wx,wz);
+      if(h <= WATER_LEVEL+1) continue;
+      const biome = biomeCol[lx+','+lz];
+      const roll = hash2(wx*0.211+301.1, wz*0.193+709.3);
+      const roll2 = hash2(wx*0.171+555.5, wz*0.161+222.2);
+      if(biome==='desert' && roll < 0.0012){
+        buildPyramid(natural, footprint, wx, wz, h);
+      } else if((biome==='plains'||biome==='forest') && roll < 0.0016){
+        buildHouse(natural, footprint, wx, wz, h);
+      } else if((biome==='plains'||biome==='forest') && roll2 < 0.0006){
+        buildWell(natural, footprint, wx, wz, h);
+      }
+    }
+  }
+
+  // trees / cacti, kept away from chunk edges and structure footprints
+  for(let lx=3; lx<CHUNK_SIZE-3; lx++){
+    for(let lz=3; lz<CHUNK_SIZE-3; lz++){
+      const wx = cx*CHUNK_SIZE+lx, wz = cz*CHUNK_SIZE+lz;
+      if(footprint.has(wx+','+wz)) continue;
+      const h = terrainHeight(wx,wz);
+      if(h <= WATER_LEVEL+1) continue;
+      const biome = biomeCol[lx+','+lz];
+      const chance = hash2(wx*0.131+11.7, wz*0.171+53.3);
+
+      if(biome==='desert'){
+        if(chance < 0.01){
+          const ch = 2 + Math.floor(hash2(wx*0.11+5.5, wz*0.13+9.9)*2);
+          for(let i=1;i<=ch;i++) natural.set(key(wx,h+i,wz), 'cactus');
+        }
+        continue;
+      }
+      const treeThreshold = biome==='forest' ? 0.05 : biome==='plains' ? 0.02 : 0.01;
+      if(chance > treeThreshold) continue;
+      const trunk = 3 + Math.floor(hash2(wx*0.271+91.1, wz*0.221+17.3)*2);
+      for(let i=1;i<=trunk;i++) natural.set(key(wx,h+i,wz), 'wood');
+      const top = h+trunk;
+      for(let dx=-2;dx<=2;dx++){
+        for(let dz=-2;dz<=2;dz++){
+          for(let dy=-1;dy<=1;dy++){
+            if(Math.abs(dx)+Math.abs(dz)+Math.abs(dy)*1.4 > 3.2) continue;
+            if(dx===0 && dz===0 && dy<=0) continue;
+            const keep = hash2((wx+dx)*1.71+dy*3.3+3.1, (wz+dz)*2.93+dy*1.13+7.7);
+            if(keep < 0.12) continue;
+            natural.set(key(wx+dx, top+dy, wz+dz), 'leaves');
+          }
+        }
+      }
+    }
+  }
+
+  if(cx===0 && cz===0) buildOverworldPortals(natural);
+
+  return finishChunk(chunk, natural, cx, cz);
+}
+
+/* ============================== GENERATION: NETHER ============================== */
+function generateNetherChunk(cx, cz){
+  const chunk = { cx, cz, blocks:new Map(), meshes:{}, group:new THREE.Group(), loaded:true };
+  const natural = new Map();
+
+  for(let lx=0; lx<CHUNK_SIZE; lx++){
+    for(let lz=0; lz<CHUNK_SIZE; lz++){
+      const wx = cx*CHUNK_SIZE+lx, wz = cz*CHUNK_SIZE+lz;
+      const h = netherTerrainHeight(wx,wz);
+      const bottom = h - DEPTH;
+      for(let y=bottom; y<=h; y++){
+        if(y === bottom){
+          natural.set(key(wx,y,wz), 'bedrock');
+        } else if(y > bottom+1 && caveNoise3D(wx+500,y,wz+500) > CAVE_THRESHOLD){
+          // carved out
+        } else {
+          natural.set(key(wx,y,wz), 'netherrack');
+        }
+      }
+      if(h < NETHER_LAVA_LEVEL){
+        for(let y=h+1; y<=NETHER_LAVA_LEVEL; y++) natural.set(key(wx,y,wz), 'lava');
+      }
+    }
+  }
+
+  if(cx===0 && cz===0) buildNetherReturnPortal(natural);
+
+  return finishChunk(chunk, natural, cx, cz);
+}
+
+/* ============================== GENERATION: THE END ============================== */
+function generateEndChunk(cx, cz){
+  const chunk = { cx, cz, blocks:new Map(), meshes:{}, group:new THREE.Group(), loaded:true };
+  const natural = new Map();
+
+  for(let lx=0; lx<CHUNK_SIZE; lx++){
+    for(let lz=0; lz<CHUNK_SIZE; lz++){
+      const wx = cx*CHUNK_SIZE+lx, wz = cz*CHUNK_SIZE+lz;
+      if(!endIslandMask(wx,wz)) continue;
+      const h = endTerrainHeight(wx,wz);
+      for(let y=h-3; y<=h; y++) natural.set(key(wx,y,wz), 'endstone');
+      const pillarRoll = hash2(wx*0.311+404.4, wz*0.291+808.8);
+      if(pillarRoll < 0.004){
+        const ph = 6 + Math.floor(hash2(wx*0.09+11, wz*0.07+22)*8);
+        for(let y=h+1; y<=h+ph; y++) natural.set(key(wx,y,wz), 'obsidian');
+      }
+    }
+  }
+
+  if(cx===0 && cz===0) buildEndReturnPortal(natural);
+
+  return finishChunk(chunk, natural, cx, cz);
+}
+
+function generateChunk(cx, cz){
+  if(currentDim === 'nether') return generateNetherChunk(cx,cz);
+  if(currentDim === 'end') return generateEndChunk(cx,cz);
+  return generateOverworldChunk(cx,cz);
+}
+
+function disposeChunk(chunk){
+  dim().worldGroup.remove(chunk.group);
+  for(const type in chunk.meshes){
+    const entry = chunk.meshes[type];
+    chunk.group.remove(entry.mesh);
+    entry.mesh.dispose();
+  }
+  chunk.blocks.clear();
+  chunk.meshes = {};
+}
+
+function updateChunks(){
+  const pcx = Math.floor(player.pos.x/CHUNK_SIZE), pcz = Math.floor(player.pos.z/CHUNK_SIZE);
+  const needed = new Set();
+
+  for(let dx=-RENDER_DISTANCE; dx<=RENDER_DISTANCE; dx++){
+    for(let dz=-RENDER_DISTANCE; dz<=RENDER_DISTANCE; dz++){
+      const cx = pcx+dx, cz = pcz+dz;
+      const k = chunkKey(cx,cz);
+      needed.add(k);
+      if(!dim().chunks.has(k)){
+        generateChunk(cx,cz);
+      } else {
+        const c = dim().chunks.get(k);
+        if(!c.loaded){ dim().worldGroup.add(c.group); c.loaded = true; }
+      }
+    }
+  }
+
+  for(const [k,c] of dim().chunks){
+    const dist = Math.max(Math.abs(c.cx-pcx), Math.abs(c.cz-pcz));
+    if(dist > KEEP_DISTANCE){
+      disposeChunk(c);
+      dim().chunks.delete(k);
+    } else if(!needed.has(k) && c.loaded){
+      dim().worldGroup.remove(c.group);
+      c.loaded = false;
+    }
+  }
+}
+
+/* ============================== LIVE BLOCK EDITS (player actions) ============================== */
+function addBlockLive(x,y,z,type){
+  const c = getChunkAt(x,z);
+  if(!c) return false;
+  const k = key(x,y,z);
+  if(c.blocks.has(k)) return false;
+  let entry = c.meshes[type];
+  if(!entry) entry = createChunkMesh(c, type, 64);
+  else if(entry.freeList.length===0 && entry.nextIndex >= entry.mesh.instanceMatrix.count){
+    entry = growChunkMesh(c, type);
+  }
+  let idx;
+  if(entry.freeList.length) idx = entry.freeList.pop();
+  else idx = entry.nextIndex++;
+  dummy.position.set(x+0.5, y+0.5, z+0.5);
+  dummy.rotation.set(0,0,0); dummy.scale.set(1,1,1);
+  dummy.updateMatrix();
+  entry.mesh.setMatrixAt(idx, dummy.matrix);
+  entry.mesh.count = Math.max(entry.mesh.count, entry.nextIndex);
+  entry.mesh.instanceMatrix.needsUpdate = true;
+  c.blocks.set(k, { type, idx });
+  dim().edits.set(k, type);
+  return true;
+}
+function removeBlockLive(x,y,z){
+  const c = getChunkAt(x,z);
+  if(!c) return null;
+  const k = key(x,y,z);
+  const b = c.blocks.get(k);
+  if(!b) return null;
+  if(b.idx !== null){
+    const entry = c.meshes[b.type];
+    entry.mesh.setMatrixAt(b.idx, zeroMatrix);
+    entry.mesh.instanceMatrix.needsUpdate = true;
+    entry.freeList.push(b.idx);
+  }
+  c.blocks.delete(k);
+  dim().edits.set(k, null);
+  revealNewlyExposedNeighbors(x,y,z);
+  return b.type;
+}
+function instantiateHiddenBlock(chunk, x, y, z, type){
+  let entry = chunk.meshes[type];
+  if(!entry) entry = createChunkMesh(chunk, type, 64);
+  else if(entry.freeList.length===0 && entry.nextIndex >= entry.mesh.instanceMatrix.count){
+    entry = growChunkMesh(chunk, type);
+  }
+  let idx;
+  if(entry.freeList.length) idx = entry.freeList.pop();
+  else idx = entry.nextIndex++;
+  dummy.position.set(x+0.5, y+0.5, z+0.5);
+  dummy.rotation.set(0,0,0); dummy.scale.set(1,1,1);
+  dummy.updateMatrix();
+  entry.mesh.setMatrixAt(idx, dummy.matrix);
+  entry.mesh.count = Math.max(entry.mesh.count, entry.nextIndex);
+  entry.mesh.instanceMatrix.needsUpdate = true;
+  chunk.blocks.set(key(x,y,z), { type, idx });
+}
+function revealNewlyExposedNeighbors(x,y,z){
+  for(const [dx,dy,dz] of NEIGHBOR_OFFSETS){
+    const nx=x+dx, ny=y+dy, nz=z+dz;
+    const nc = getChunkAt(nx,nz);
+    if(!nc) continue;
+    const nb = nc.blocks.get(key(nx,ny,nz));
+    if(nb && nb.idx === null){
+      instantiateHiddenBlock(nc, nx, ny, nz, nb.type);
+    }
+  }
+}
+
+/* ============================== PLAYER ============================== */
+const spawnH = terrainHeight(0,0);
+const player = {
+  pos: new THREE.Vector3(0.5, spawnH+3, 0.5),
+  vel: new THREE.Vector3(0,0,0),
+  grounded: false,
+  yaw: 0,
+  pitch: 0
+};
+camera.position.set(player.pos.x, player.pos.y+EYE_HEIGHT, player.pos.z);
+
+updateChunks();
+
+const keys = {};
+let selectedSlot = 0;
+let selectedType = HOTBAR[0];
+let started = false;
+let paused = false;
+let locked = false;
+let portalCooldown = 0;
+let creative = false;
+
+/* ============================== INVENTORY ============================== */
+const inventory = {};
+ALL_ITEMS.forEach(t => inventory[t] = 0);
+
+function bestPickaxeTier(){
+  let best = 0;
+  for(const name in TOOL_TIER){
+    if((inventory[name]||0) > 0) best = Math.max(best, TOOL_TIER[name]);
+  }
+  return best;
+}
+function nearBlock(type, radius){
+  radius = radius || 4;
+  const px = Math.floor(player.pos.x), py = Math.floor(player.pos.y), pz = Math.floor(player.pos.z);
+  for(let dx=-radius; dx<=radius; dx++){
+    for(let dy=-radius; dy<=radius; dy++){
+      for(let dz=-radius; dz<=radius; dz++){
+        const b = getBlock(px+dx, py+dy, pz+dz);
+        if(b && b.type === type) return true;
+      }
+    }
+  }
+  return false;
+}
+function hasFuel(){ return (inventory.coal||0)>0 || (inventory.planks||0)>0 || (inventory.wood||0)>0; }
+function consumeFuel(){
+  if(inventory.coal>0) inventory.coal--;
+  else if(inventory.planks>0) inventory.planks--;
+  else if(inventory.wood>0) inventory.wood--;
+}
+function canCraft(recipe){
+  if(!Object.entries(recipe.inputs).every(([t,n]) => (inventory[t]||0) >= n)) return false;
+  if(recipe.requires === 'table' && !nearBlock('crafting_table')) return false;
+  if(recipe.requires === 'furnace' && (!nearBlock('furnace') || !hasFuel())) return false;
+  return true;
+}
+function craft(recipe){
+  if(!canCraft(recipe)) return;
+  Object.entries(recipe.inputs).forEach(([t,n]) => inventory[t] -= n);
+  if(recipe.requires === 'furnace') consumeFuel();
+  Object.entries(recipe.outputs).forEach(([t,n]) => inventory[t] = (inventory[t]||0) + n);
+  updateHotbarUI();
+  renderInventoryPanel();
+  renderCraftingPanel();
+}
+
+/* ============================== UI: HOTBAR (+ mirrored row in the inventory screen) ============================== */
+function getSlotColor(type){
+  if(BLOCK_TYPES[type]) return BLOCK_TYPES[type].color;
+  if(type === 'flint_and_steel') return 0x5a5a5a;
+  if(type === 'eye_of_ender') return 0x2ee6a8;
+  return 0x999999;
+}
+function buildSlotEl(type, i, onClick){
+  const slot = document.createElement('div');
+  slot.className = 'slot' + (i===0 ? ' selected' : '');
+  const swatch = document.createElement('div');
+  swatch.className = 'swatch';
+  swatch.style.background = '#' + getSlotColor(type).toString(16).padStart(6,'0');
+  const num = document.createElement('div');
+  num.className = 'num'; num.textContent = (i+1<=9) ? (i+1) : '';
+  const count = document.createElement('div');
+  count.className = 'count'; count.textContent = '0';
+  slot.appendChild(swatch); slot.appendChild(num); slot.appendChild(count);
+  slot.addEventListener('click', onClick);
+  return slot;
+}
+const hotbarEl = document.getElementById('hotbar');
+const hotbarMirrorEl = document.getElementById('hotbarMirror');
+HOTBAR.forEach((type, i)=>{
+  hotbarEl.appendChild(buildSlotEl(type, i, ()=>{ selectedSlot = i; selectedType = type; updateHotbarUI(); }));
+  hotbarMirrorEl.appendChild(buildSlotEl(type, i, ()=>{ selectedSlot = i; selectedType = type; updateHotbarUI(); }));
+});
+function updateHotbarUI(){
+  [hotbarEl, hotbarMirrorEl].forEach(container=>{
+    [...container.children].forEach((el,i)=>{
+      el.classList.toggle('selected', i===selectedSlot);
+      const type = HOTBAR[i];
+      const n = inventory[type] || 0;
+      el.querySelector('.count').textContent = creative ? '\u221e' : n;
+      el.classList.toggle('empty', !creative && n===0);
+    });
+  });
+}
+updateHotbarUI();
+
+/* ============================== TOAST ============================== */
+const toastEl = document.getElementById('toast');
+let toastTimer = null;
+function showToast(msg){
+  toastEl.textContent = msg;
+  toastEl.classList.add('show');
+  if(toastTimer) clearTimeout(toastTimer);
+  toastTimer = setTimeout(()=> toastEl.classList.remove('show'), 1400);
+}
+
+/* ============================== UI: CRAFTING PANEL ============================== */
+/* ============================== UI: INVENTORY PANEL ============================== */
+const ITEM_COLORS = {
+  coal: 0x2b2b2b, redstone: 0xc41e1e, lapis: 0x2450c9, diamond: 0x6be3e0,
+  stick: 0xa9835a, iron_ingot: 0xe8e8ea, gold_ingot: 0xf6d94a, flint_and_steel: 0x5a5a5a,
+  ender_pearl: 0x2e8f6b, blaze_powder: 0xe6c94d, eye_of_ender: 0x2ee6a8,
+};
+const TOOL_MATERIAL_COLOR = { wood:0x8b5a2b, stone:0x8a8a8e, iron:0xd8d8da, diamond:0x6be3e0 };
+function getItemColor(name){
+  if(BLOCK_TYPES[name]) return BLOCK_TYPES[name].color;
+  if(ITEM_COLORS[name] !== undefined) return ITEM_COLORS[name];
+  for(const mat in TOOL_MATERIAL_COLOR){
+    if(name.indexOf(mat+'_') === 0) return TOOL_MATERIAL_COLOR[mat];
+  }
+  return 0x999999;
+}
+const RARITY = {
+  diamond:'epic', diamond_ore:'epic', diamond_pickaxe:'epic', diamond_axe:'epic', diamond_shovel:'epic', diamond_sword:'epic',
+  eye_of_ender:'epic',
+  gold_ore:'rare', gold_ingot:'rare', lapis:'rare', lapis_ore:'rare', ender_pearl:'rare', blaze_powder:'rare',
+  iron_ore:'uncommon', iron_ingot:'uncommon', redstone:'uncommon', redstone_ore:'uncommon',
+  iron_pickaxe:'uncommon', iron_axe:'uncommon', iron_shovel:'uncommon', iron_sword:'uncommon',
+};
+function rarityOf(name){ return RARITY[name] || 'common'; }
+
+const NON_ORE_HOTBAR = HOTBAR.filter(t => !['coal_ore','iron_ore','gold_ore','redstone_ore','lapis_ore','diamond_ore','crafting_table','furnace','flint_and_steel','eye_of_ender'].includes(t));
+const INV_CATEGORIES = [
+  { title:'Building Blocks', items: NON_ORE_HOTBAR },
+  { title:'Ores & Gems', items: ['coal_ore','coal','iron_ore','iron_ingot','gold_ore','gold_ingot','redstone_ore','redstone','lapis_ore','lapis','diamond_ore','diamond'] },
+  { title:'Workstations', items: ['crafting_table','furnace'] },
+  { title:'The End', items: ['ender_pearl','blaze_powder','eye_of_ender'] },
+  { title:'Tools & Materials', items: ['stick','flint_and_steel',
+    'wood_pickaxe','stone_pickaxe','iron_pickaxe','diamond_pickaxe',
+    'wood_axe','stone_axe','iron_axe','diamond_axe',
+    'wood_shovel','stone_shovel','iron_shovel','diamond_shovel',
+    'wood_sword','stone_sword','iron_sword','diamond_sword'] },
+];
+const inventoryListEl = document.getElementById('inventoryList');
+function renderInventoryPanel(){
+  inventoryListEl.innerHTML = '';
+  INV_CATEGORIES.forEach(cat=>{
+    const title = document.createElement('div');
+    title.className = 'inv-section-title';
+    title.textContent = cat.title;
+    inventoryListEl.appendChild(title);
+    const grid = document.createElement('div');
+    grid.className = 'inv-grid';
+    cat.items.forEach(name=>{
+      const n = inventory[name] || 0;
+      const cell = document.createElement('div');
+      cell.className = 'inv-cell rarity-' + rarityOf(name) + ((n===0 && !creative) ? ' empty' : '');
+      cell.title = labelize(name);
+      const swatch = document.createElement('div');
+      swatch.className = 'inv-swatch';
+      swatch.style.background = '#' + getItemColor(name).toString(16).padStart(6,'0');
+      const count = document.createElement('div');
+      count.className = 'inv-count';
+      count.textContent = creative ? '\u221e' : n;
+      const label = document.createElement('div');
+      label.className = 'inv-name';
+      label.textContent = labelize(name);
+      cell.appendChild(swatch); cell.appendChild(count); cell.appendChild(label);
+      grid.appendChild(cell);
+    });
+    inventoryListEl.appendChild(grid);
+  });
+}
+
+const craftListEl = document.getElementById('craftList');
+function renderCraftingPanel(){
+  craftListEl.innerHTML = '';
+  let lastSection = null;
+  RECIPES.forEach(r=>{
+    const section = r.requires === 'furnace' ? 'Furnace (needs fuel: coal/planks/wood)' : r.requires === 'table' ? 'Crafting Table' : 'Basic';
+    if(section !== lastSection){
+      const title = document.createElement('div');
+      title.className = 'craft-section-title';
+      title.textContent = section;
+      craftListEl.appendChild(title);
+      lastSection = section;
+    }
+    const row = document.createElement('div');
+    row.className = 'craft-row';
+    const label = document.createElement('span');
+    const have = Object.entries(r.inputs).map(([t,n])=> `${inventory[t]||0}/${n} ${t}`).join(', ');
+    label.textContent = r.label + '  (' + have + ')';
+    const btn = document.createElement('button');
+    btn.textContent = 'Craft';
+    btn.disabled = !canCraft(r);
+    btn.addEventListener('click', ()=>{ craft(r); });
+    row.appendChild(label); row.appendChild(btn);
+    craftListEl.appendChild(row);
+  });
+}
+
+/* ============================== DIMENSION TRAVEL & ATMOSPHERE ============================== */
+const dimBadgeEl = document.getElementById('dimBadge');
+const DIM_NAMES = { overworld:'Overworld', nether:'The Nether', end:'The End' };
+let dayNightActive = true;
+
+function updateDimensionHUD(){
+  dimBadgeEl.textContent = DIM_NAMES[currentDim] + (creative ? ' \u00b7 Creative' : '');
+}
+function applyDimensionAtmosphere(d){
+  if(d === 'overworld'){
+    dayNightActive = true;
+    scene.fog.near = 10; scene.fog.far = RENDER_DISTANCE*CHUNK_SIZE - 4;
+  } else if(d === 'nether'){
+    dayNightActive = false;
+    scene.background.set(0x2b0e05);
+    scene.fog.color.set(0x2b0e05);
+    scene.fog.near = 8; scene.fog.far = 30;
+    sun.intensity = 0.25; ambient.intensity = 0.55;
+  } else if(d === 'end'){
+    dayNightActive = false;
+    scene.background.set(0x0a0618);
+    scene.fog.color.set(0x0a0618);
+    scene.fog.near = 10; scene.fog.far = 40;
+    sun.intensity = 0.6; ambient.intensity = 0.45;
+  }
+}
+function travelTo(newDim, arrivalPos){
+  scene.remove(dim().worldGroup);
+  currentDim = newDim;
+  scene.add(dim().worldGroup);
+  player.pos.copy(arrivalPos);
+  player.vel.set(0,0,0);
+  let guard = 0;
+  while(collidesAt(player.pos) && guard < 8){ player.pos.y += 1; guard++; }
+  portalCooldown = 1.5;
+  applyDimensionAtmosphere(newDim);
+  updateDimensionHUD();
+  updateChunks();
+}
+function checkPortal(dt){
+  if(portalCooldown > 0){ portalCooldown -= dt; return; }
+  const bx = Math.floor(player.pos.x), by = Math.floor(player.pos.y+0.9), bz = Math.floor(player.pos.z);
+  const b = getBlock(bx,by,bz);
+  if(!b) return;
+  if(b.type === 'portal_nether'){
+    if(currentDim === 'overworld') travelTo('nether', NETHER_ARRIVAL);
+    else if(currentDim === 'nether') travelTo('overworld', OW_NETHER_ARRIVAL);
+  } else if(b.type === 'portal_end'){
+    if(currentDim === 'overworld') travelTo('end', END_ARRIVAL);
+    else if(currentDim === 'end') travelTo('overworld', OW_END_ARRIVAL);
+  }
+}
+
+/* ============================== CREATIVE MODE ============================== */
+function toggleCreative(){
+  creative = !creative;
+  updateDimensionHUD();
+  updateHotbarUI();
+  showToast(creative ? 'Creative mode ON' : 'Creative mode OFF');
+}
+
+/* ============================== START / PAUSE MENU ============================== */
+const blocker = document.getElementById('blocker');
+const startbtn = document.getElementById('startbtn');
+const menuEl = document.getElementById('menu');
+const menuMsgEl = document.getElementById('menuMsg');
+const resumeBtn = document.getElementById('resumeBtn');
+const saveBtn = document.getElementById('saveBtn');
+const loadBtn = document.getElementById('loadBtn');
+const creativeBtn = document.getElementById('creativeBtn');
+const modeNoteEl = document.getElementById('modeNote');
+const lockBtn = document.getElementById('lockBtn');
+
+function requestLock(){
+  try{ renderer.domElement.requestPointerLock(); }catch(e){}
+}
+function updateLockBtn(){
+  lockBtn.style.display = (started && !paused && !locked) ? 'block' : 'none';
+}
+lockBtn.addEventListener('click', requestLock);
+
+startbtn.addEventListener('click', ()=>{
+  started = true;
+  blocker.style.display = 'none';
+  requestLock();
+  updateLockBtn();
+});
+
+document.addEventListener('pointerlockchange', ()=>{
+  locked = document.pointerLockElement === renderer.domElement;
+  modeNoteEl.textContent = locked ? '' : '(mouse-lock off \u2014 click the lock button, or drag to look / click to break)';
+  updateLockBtn();
+});
+document.addEventListener('pointerlockerror', ()=>{
+  locked = false;
+  modeNoteEl.textContent = '(mouse-lock blocked here \u2014 drag to look, click to break, or try the lock button. If this keeps failing, open the file directly in its own browser tab rather than an embedded preview.)';
+  updateLockBtn();
+});
+
+function openMenu(){
+  if(!started || paused) return;
+  paused = true;
+  if(locked) document.exitPointerLock();
+  menuMsgEl.textContent = '';
+  loadBtn.disabled = !localStorage.getItem(SAVE_KEY);
+  renderInventoryPanel();
+  renderCraftingPanel();
+  menuEl.style.display = 'flex';
+  updateLockBtn();
+}
+function closeMenu(){
+  paused = false;
+  menuEl.style.display = 'none';
+  requestLock();
+  updateLockBtn();
+}
+resumeBtn.addEventListener('click', closeMenu);
+creativeBtn.addEventListener('click', ()=>{ toggleCreative(); updateHotbarUI(); renderInventoryPanel(); });
+
+/* ---- settings inputs ---- */
+const nametagEl = document.getElementById('nametag');
+function updateNametagDisplay(){ nametagEl.textContent = playerName; }
+updateNametagDisplay();
+
+const nameInput = document.getElementById('nameInput');
+nameInput.addEventListener('input', ()=>{
+  playerName = nameInput.value.trim() || 'Player';
+  updateNametagDisplay();
+});
+
+const renderDistInput = document.getElementById('renderDistInput');
+const renderDistVal = document.getElementById('renderDistVal');
+renderDistInput.addEventListener('input', ()=>{
+  const v = parseInt(renderDistInput.value);
+  renderDistVal.textContent = v;
+  applyRenderDistanceSetting(v);
+});
+
+const resInput = document.getElementById('resInput');
+const resVal = document.getElementById('resVal');
+resInput.addEventListener('input', ()=>{
+  const v = parseFloat(resInput.value);
+  resVal.textContent = Math.round(v*100) + '%';
+  applyResolutionSetting(v);
+});
+
+const fovInput = document.getElementById('fovInput');
+const fovVal = document.getElementById('fovVal');
+fovInput.addEventListener('input', ()=>{
+  const v = parseInt(fovInput.value);
+  fovVal.textContent = v;
+  applyFovSetting(v);
+});
+
+const sensInput = document.getElementById('sensInput');
+const sensVal = document.getElementById('sensVal');
+sensInput.addEventListener('input', ()=>{
+  mouseSensitivity = parseFloat(sensInput.value);
+  sensVal.textContent = mouseSensitivity.toFixed(1) + 'x';
+});
+
+saveBtn.addEventListener('click', ()=>{
+  try{
+    const data = {
+      version: 2,
+      currentDim,
+      creative,
+      edits: {
+        overworld: Array.from(dimState.overworld.edits.entries()),
+        nether: Array.from(dimState.nether.edits.entries()),
+        end: Array.from(dimState.end.edits.entries())
+      },
+      inventory: { ...inventory },
+      player: { x:player.pos.x, y:player.pos.y, z:player.pos.z, yaw:player.yaw, pitch:player.pitch },
+      dayTime,
+      settings: { playerName, mouseSensitivity, renderDistance:RENDER_DISTANCE, resolutionScale:RESOLUTION_SCALE, fov:camera.fov }
+    };
+    localStorage.setItem(SAVE_KEY, JSON.stringify(data));
+    menuMsgEl.textContent = 'World saved!';
+    loadBtn.disabled = false;
+  }catch(e){
+    menuMsgEl.textContent = 'Save failed: ' + e.message;
+  }
+});
+
+loadBtn.addEventListener('click', ()=>{
+  const raw = localStorage.getItem(SAVE_KEY);
+  if(!raw){ menuMsgEl.textContent = 'No saved world found.'; return; }
+  try{
+    const data = JSON.parse(raw);
+    for(const d of ['overworld','nether','end']){
+      for(const [,c] of dimState[d].chunks){
+        dimState[d].worldGroup.remove(c.group);
+        for(const type in c.meshes) c.meshes[type].mesh.dispose();
+      }
+      dimState[d].chunks.clear();
+      dimState[d].edits.clear();
+    }
+    if(Array.isArray(data.edits)){
+      data.edits.forEach(([k,t]) => dimState.overworld.edits.set(k,t));
+    } else if(data.edits){
+      for(const d of ['overworld','nether','end']){
+        (data.edits[d]||[]).forEach(([k,t]) => dimState[d].edits.set(k,t));
+      }
+    }
+    for(const t of ALL_ITEMS) inventory[t] = 0;
+    Object.assign(inventory, data.inventory || {});
+    creative = !!data.creative;
+
+    scene.remove(dimState.overworld.worldGroup);
+    scene.remove(dimState.nether.worldGroup);
+    scene.remove(dimState.end.worldGroup);
+    currentDim = data.currentDim || 'overworld';
+    scene.add(dim().worldGroup);
+    applyDimensionAtmosphere(currentDim);
+    updateDimensionHUD();
+
+    if(data.player){
+      player.pos.set(data.player.x, data.player.y, data.player.z);
+      player.yaw = data.player.yaw; player.pitch = data.player.pitch;
+    }
+    if(typeof data.dayTime === 'number') dayTime = data.dayTime;
+    if(data.settings){
+      if(data.settings.playerName){ playerName = data.settings.playerName; nameInput.value = playerName; updateNametagDisplay(); }
+      if(typeof data.settings.mouseSensitivity === 'number'){ mouseSensitivity = data.settings.mouseSensitivity; sensInput.value = mouseSensitivity; sensVal.textContent = mouseSensitivity.toFixed(1)+'x'; }
+      if(typeof data.settings.renderDistance === 'number'){ renderDistInput.value = data.settings.renderDistance; renderDistVal.textContent = data.settings.renderDistance; applyRenderDistanceSetting(data.settings.renderDistance); }
+      if(typeof data.settings.resolutionScale === 'number'){ resInput.value = data.settings.resolutionScale; resVal.textContent = Math.round(data.settings.resolutionScale*100)+'%'; applyResolutionSetting(data.settings.resolutionScale); }
+      if(typeof data.settings.fov === 'number'){ fovInput.value = data.settings.fov; fovVal.textContent = data.settings.fov; applyFovSetting(data.settings.fov); }
+    }
+    updateChunks();
+    updateHotbarUI();
+    menuMsgEl.textContent = 'World loaded!';
+  }catch(e){
+    menuMsgEl.textContent = 'Load failed: ' + e.message;
+  }
+});
+
+/* ============================== INPUT ============================== */
+document.addEventListener('keydown', (e)=>{
+  keys[e.code] = true;
+  if(e.code === 'Escape' || e.code === 'KeyE'){
+    if(!started) return;
+    if(paused) closeMenu(); else openMenu();
+    return;
+  }
+  if(e.code === 'KeyC'){
+    if(!started || paused) return;
+    toggleCreative();
+    return;
+  }
+  const num = parseInt(e.key);
+  if(num >= 1 && num <= 9){
+    selectedSlot = num-1;
+    selectedType = HOTBAR[selectedSlot];
+    updateHotbarUI();
+  }
+});
+document.addEventListener('keyup', (e)=>{ keys[e.code] = false; });
+document.addEventListener('wheel', (e)=>{
+  if(!started || paused) return;
+  selectedSlot = (selectedSlot + (e.deltaY>0?1:-1) + HOTBAR.length) % HOTBAR.length;
+  selectedType = HOTBAR[selectedSlot];
+  updateHotbarUI();
+});
+renderer.domElement.addEventListener('contextmenu', (e)=> e.preventDefault());
+
+let isDraggingLook = false, dragMoved = false, dragLastX = 0, dragLastY = 0;
+
+document.addEventListener('mousemove', (e)=>{
+  if(!started || paused) return;
+  if(locked){
+    const s = 0.0022 * mouseSensitivity;
+    player.yaw -= e.movementX * s;
+    player.pitch -= e.movementY * s;
+  } else if(isDraggingLook){
+    const s = 0.0026 * mouseSensitivity;
+    const dx = e.clientX - dragLastX, dy = e.clientY - dragLastY;
+    dragLastX = e.clientX; dragLastY = e.clientY;
+    if(Math.abs(dx)+Math.abs(dy) > 2) dragMoved = true;
+    player.yaw -= dx * s;
+    player.pitch -= dy * s;
+  } else {
+    return;
+  }
+  const limit = Math.PI/2 - 0.01;
+  player.pitch = Math.max(-limit, Math.min(limit, player.pitch));
+});
+
+renderer.domElement.addEventListener('mousedown', (e)=>{
+  if(!started || paused) return;
+  if(locked){
+    if(e.button === 0) performBreakAction();
+    else if(e.button === 2) performPlaceAction();
+    return;
+  }
+  if(e.button === 0){
+    isDraggingLook = true; dragMoved = false;
+    dragLastX = e.clientX; dragLastY = e.clientY;
+  } else if(e.button === 2){
+    performPlaceAction();
+  }
+});
+document.addEventListener('mouseup', (e)=>{
+  if(e.button === 0 && isDraggingLook){
+    if(!dragMoved) performBreakAction();
+    isDraggingLook = false;
+  }
+});
+
+/* ============================== RAYCAST (voxel march) & ACTIONS ============================== */
+const rayOrigin = new THREE.Vector3();
+const rayDir = new THREE.Vector3();
+function pickBlock(){
+  camera.getWorldDirection(rayDir);
+  rayOrigin.copy(camera.position);
+  let lastEmpty = null;
+  const step = 0.04;
+  for(let t=0; t<REACH; t+=step){
+    const px = rayOrigin.x + rayDir.x*t;
+    const py = rayOrigin.y + rayDir.y*t;
+    const pz = rayOrigin.z + rayDir.z*t;
+    const bx = Math.floor(px), by = Math.floor(py), bz = Math.floor(pz);
+    const b = getBlock(bx,by,bz);
+    if(b && BLOCK_TYPES[b.type].solid){
+      return { hit:{x:bx,y:by,z:bz}, place:lastEmpty };
+    }
+    lastEmpty = {x:bx,y:by,z:bz};
+  }
+  return null;
+}
+function playerIntersectsBlock(bx,by,bz){
+  const minX = player.pos.x - PLAYER_HALF_WIDTH, maxX = player.pos.x + PLAYER_HALF_WIDTH;
+  const minZ = player.pos.z - PLAYER_HALF_WIDTH, maxZ = player.pos.z + PLAYER_HALF_WIDTH;
+  const minY = player.pos.y, maxY = player.pos.y + PLAYER_HEIGHT;
+  return bx+1 > minX && bx < maxX && bz+1 > minZ && bz < maxZ && by+1 > minY && by < maxY;
+}
+function performBreakAction(){
+  const result = pickBlock();
+  if(!result) return;
+  const target = getBlock(result.hit.x, result.hit.y, result.hit.z);
+  if(!target) return;
+  const def = BLOCK_TYPES[target.type];
+  if(!creative && (def.tier||0) > bestPickaxeTier()){
+    showToast('Need a better pickaxe for this block');
+    return;
+  }
+  const removed = removeBlockLive(result.hit.x, result.hit.y, result.hit.z);
+  if(!removed) return;
+  if(creative) return;
+  const dropType = ORE_DROP_REMAP[removed] || removed;
+  if(inventory.hasOwnProperty(dropType)){
+    inventory[dropType] = (inventory[dropType]||0) + 1;
+    updateHotbarUI();
+  }
+  if(removed === 'obsidian' && currentDim === 'end' && Math.random() < 0.12){
+    inventory.ender_pearl = (inventory.ender_pearl||0) + 1;
+    showToast('Found an Ender Pearl!');
+    updateHotbarUI();
+  } else if(removed === 'netherrack' && currentDim === 'nether' && Math.random() < 0.08){
+    inventory.blaze_powder = (inventory.blaze_powder||0) + 1;
+    showToast('Found Blaze Powder!');
+    updateHotbarUI();
+  }
+}
+function getForwardCell(dist){
+  camera.getWorldDirection(rayDir);
+  const px = camera.position.x + rayDir.x*dist;
+  const py = camera.position.y + rayDir.y*dist;
+  const pz = camera.position.z + rayDir.z*dist;
+  return { x: Math.floor(px), y: Math.floor(py), z: Math.floor(pz) };
+}
+function performPlaceAction(){
+  if(selectedType === 'flint_and_steel'){
+    if(!creative && (inventory.flint_and_steel||0) <= 0) return;
+    const cell = getForwardCell(3.2);
+    const lit = tryLightPortal(cell.x, cell.y, cell.z);
+    showToast(lit ? 'The portal roars to life!' : 'Nothing happens \u2014 aim into an empty obsidian frame');
+    return;
+  }
+  if(selectedType === 'eye_of_ender'){
+    const result = pickBlock();
+    if(!result){ showToast('Aim at an empty End Portal Frame socket'); return; }
+    const target = getBlock(result.hit.x, result.hit.y, result.hit.z);
+    if(!target || target.type !== 'end_frame'){
+      showToast('That\u2019s not an empty End Portal Frame socket');
+      return;
+    }
+    if(!creative && (inventory.eye_of_ender||0) <= 0) return;
+    insertEyeOfEnder(result.hit.x, result.hit.y, result.hit.z);
+    if(!creative){ inventory.eye_of_ender--; updateHotbarUI(); }
+    return;
+  }
+  const result = pickBlock();
+  if(!result) return;
+  const hitBlock = getBlock(result.hit.x, result.hit.y, result.hit.z);
+  if(hitBlock && (hitBlock.type === 'crafting_table' || hitBlock.type === 'furnace')){
+    useWorkstation(hitBlock.type);
+    return;
+  }
+  if(!result.place) return;
+  if(playerIntersectsBlock(result.place.x, result.place.y, result.place.z)) return;
+  if(!creative && (inventory[selectedType]||0) <= 0) return;
+  const ok = addBlockLive(result.place.x, result.place.y, result.place.z, selectedType);
+  if(ok && !creative){ inventory[selectedType]--; updateHotbarUI(); }
+}
+
+function useWorkstation(type){
+  openMenu();
+  if(!paused) return; // openMenu can no-op if already paused/not started
+  menuMsgEl.textContent = type === 'furnace'
+    ? 'Using the furnace \u2014 smelting recipes are highlighted below.'
+    : 'Using the crafting table \u2014 its recipes are highlighted below.';
+  highlightWorkstationSection(type);
+}
+function highlightWorkstationSection(type){
+  const wantedTitle = type === 'furnace' ? 'furnace' : 'crafting table';
+  [...craftListEl.children].forEach(el => el.classList.remove('workstation-active'));
+  let match = null;
+  [...craftListEl.children].forEach(el=>{
+    if(el.classList.contains('craft-section-title') && el.textContent.toLowerCase().indexOf(wantedTitle) !== -1){
+      match = el;
+    }
+  });
+  if(match){
+    match.classList.add('workstation-active');
+    requestAnimationFrame(()=> match.scrollIntoView({ block:'center', behavior:'smooth' }));
+  }
+}
+
+/* ============================== PHYSICS / MOVEMENT ============================== */
+const forward = new THREE.Vector3();
+const right = new THREE.Vector3();
+const up = new THREE.Vector3(0,1,0);
+
+function collidesAt(pos){
+  const minX = Math.floor(pos.x - PLAYER_HALF_WIDTH), maxX = Math.floor(pos.x + PLAYER_HALF_WIDTH);
+  const minZ = Math.floor(pos.z - PLAYER_HALF_WIDTH), maxZ = Math.floor(pos.z + PLAYER_HALF_WIDTH);
+  const minY = Math.floor(pos.y), maxY = Math.floor(pos.y + PLAYER_HEIGHT);
+  for(let x=minX;x<=maxX;x++)
+    for(let y=minY;y<=maxY;y++)
+      for(let z=minZ;z<=maxZ;z++)
+        if(isSolid(x,y,z)) return true;
+  return false;
+}
+
+function updatePlayer(dt){
+  camera.getWorldDirection(forward);
+  forward.y = 0; forward.normalize();
+  right.crossVectors(forward, up).normalize();
+
+  let ix = 0, iz = 0;
+  if(keys['KeyW']) iz += 1;
+  if(keys['KeyS']) iz -= 1;
+  if(keys['KeyD']) ix += 1;
+  if(keys['KeyA']) ix -= 1;
+
+  const sprinting = keys['ShiftLeft'] || keys['ShiftRight'];
+  const speed = creative ? CREATIVE_MOVE_SPEED : (sprinting ? SPRINT_SPEED : WALK_SPEED);
+  const move = new THREE.Vector3();
+  move.addScaledVector(forward, iz);
+  move.addScaledVector(right, ix);
+  if(move.lengthSq() > 0){ move.normalize().multiplyScalar(speed); }
+
+  player.vel.x = move.x;
+  player.vel.z = move.z;
+
+  if(creative){
+    if(keys['Space']) player.vel.y = FLY_SPEED;
+    else if(sprinting) player.vel.y = -FLY_SPEED;
+    else player.vel.y = 0;
+  } else {
+    if(keys['Space'] && player.grounded){
+      player.vel.y = JUMP_SPEED;
+      player.grounded = false;
+    }
+    player.vel.y -= GRAVITY * dt;
+    if(player.vel.y < -40) player.vel.y = -40;
+  }
+
+  let next = player.pos.clone(); next.x += player.vel.x * dt;
+  if(!collidesAt(next)) player.pos.x = next.x;
+
+  next = player.pos.clone(); next.z += player.vel.z * dt;
+  if(!collidesAt(next)) player.pos.z = next.z;
+
+  next = player.pos.clone(); next.y += player.vel.y * dt;
+  if(!collidesAt(next)){
+    player.pos.y = next.y;
+    player.grounded = false;
+  } else {
+    if(!creative && player.vel.y < 0) player.grounded = true;
+    player.vel.y = 0;
+  }
+
+  if(player.pos.y < -20){
+    if(currentDim === 'overworld'){
+      const h = terrainHeight(Math.floor(player.pos.x), Math.floor(player.pos.z));
+      player.pos.y = h+3;
+    } else {
+      player.pos.copy(currentDim==='nether' ? NETHER_ARRIVAL : END_ARRIVAL);
+    }
+    player.vel.set(0,0,0);
+  }
+
+  camera.position.set(player.pos.x, player.pos.y + EYE_HEIGHT, player.pos.z);
+  const euler = new THREE.Euler(player.pitch, player.yaw, 0, 'YXZ');
+  camera.quaternion.setFromEuler(euler);
+
+  checkPortal(dt);
+}
+
+/* ============================== DAY / NIGHT CYCLE (overworld only) ============================== */
+const DAY_LENGTH = 150;
+let dayTime = 40;
+const skyDay = new THREE.Color(0x87ceeb);
+const skyNight = new THREE.Color(0x0b0e2c);
+const fogDay = new THREE.Color(0x87ceeb);
+const fogNight = new THREE.Color(0x0b0e2c);
+
+function updateDayNight(dt){
+  dayTime += dt;
+  const angle = (dayTime / DAY_LENGTH) * Math.PI * 2;
+  const sunHeight = Math.sin(angle);
+  sun.position.set(Math.cos(angle)*60, Math.max(sunHeight,0.05)*70 + 5, 30);
+  const brightness = Math.max(0.05, sunHeight);
+  sun.intensity = 0.15 + brightness * 0.95;
+  ambient.intensity = 0.2 + brightness * 0.4;
+
+  const t = Math.max(0, Math.min(1, (sunHeight+0.25)/1.1));
+  scene.background.copy(skyNight).lerp(skyDay, t);
+  scene.fog.color.copy(fogNight).lerp(fogDay, t);
+}
+
+/* ============================== MAIN LOOP ============================== */
+const fpsEl = document.getElementById('fps');
+let lastTime = performance.now();
+let frameCount = 0, fpsTimer = 0, chunkTimer = 0;
+
+function animate(){
+  requestAnimationFrame(animate);
+  const now = performance.now();
+  let dt = (now - lastTime) / 1000;
+  dt = Math.min(dt, 0.08);
+  lastTime = now;
+
+  if(started && !paused){
+    updatePlayer(dt);
+    chunkTimer += dt;
+    if(chunkTimer >= CHUNK_UPDATE_INTERVAL){
+      chunkTimer = 0;
+      updateChunks();
+    }
+  }
+  if(dayNightActive) updateDayNight(dt);
+  if(portalNetherTexture) portalNetherTexture.offset.y = (now/2000) % 1;
+  if(portalEndTexture) portalEndTexture.offset.y = (now/2600) % 1;
+
+  frameCount++; fpsTimer += dt;
+  if(fpsTimer >= 0.5){
+    fpsEl.textContent = Math.round(frameCount/fpsTimer) + ' fps \u00b7 ' + dim().chunks.size + ' chunks loaded';
+    frameCount = 0; fpsTimer = 0;
+  }
+
+  renderer.render(scene, camera);
+}
+animate();
+
+})();
+</script>
+</body>
+</html>
