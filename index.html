@@ -72,24 +72,6 @@
   }
   #lockBtn:hover { background:rgba(0,0,0,0.75); border-color:#fff; }
 
-  #chatBox {
-    position:fixed; left:12px; bottom:76px; width:420px; max-width:70vw; z-index:15; display:none;
-  }
-  #chatLog {
-    max-height:160px; overflow-y:auto; margin-bottom:4px; display:flex; flex-direction:column; gap:2px;
-  }
-  #chatLog div {
-    background:rgba(0,0,0,0.55); color:#fff; font-family:'VT323',monospace; font-size:15px;
-    padding:2px 8px; text-shadow:1px 1px 0 #000; width:fit-content; max-width:100%;
-  }
-  #chatLog div.chat-error { color:#ff6b6b; }
-  #chatLog div.chat-info { color:#8fe38f; }
-  #chatInput {
-    width:100%; box-sizing:border-box; font-family:'VT323',monospace; font-size:16px;
-    background:rgba(0,0,0,0.65); color:#fff; border:2px solid rgba(255,255,255,0.5);
-    padding:5px 8px; outline:none;
-  }
-
   #blocker, #menu {
     position:fixed; inset:0; z-index:100; background:rgba(0,0,0,0.6);
     display:flex; align-items:center; justify-content:center; flex-direction:column;
@@ -212,10 +194,6 @@
 <div id="nametag"></div>
 <div id="hotbar"></div>
 <button id="lockBtn">&#128274; Click to enable mouse-look</button>
-<div id="chatBox">
-  <div id="chatLog"></div>
-  <input type="text" id="chatInput" maxlength="120" placeholder="Type a message or /command, Enter to send">
-</div>
 
 <div id="blocker">
   <h1>&#9968; Voxel World</h1>
@@ -990,19 +968,13 @@ function insertEyeOfEnder(x,y,z){
   addBlockLive(x,y,z, 'end_frame_eye');
   checkEndPortalCompletion();
 }
-function countFilledHubSockets(){
-  return END_HUB_FRAME_CELLS.filter(k=>{
+function checkEndPortalCompletion(){
+  const allFilled = END_HUB_FRAME_CELLS.every(k=>{
     const parts = k.split(',');
     const b = getBlock(parseInt(parts[0]), parseInt(parts[1]), parseInt(parts[2]));
     return b && b.type === 'end_frame_eye';
-  }).length;
-}
-function checkEndPortalCompletion(){
-  const filled = countFilledHubSockets();
-  if(filled < END_HUB_FRAME_CELLS.length){
-    showToast('Eye of Ender placed (' + filled + '/' + END_HUB_FRAME_CELLS.length + ')');
-    return;
-  }
+  });
+  if(!allFilled) return;
   for(const k of END_HUB_CENTER_CELLS){
     const parts = k.split(',');
     addBlockLive(parseInt(parts[0]), parseInt(parts[1]), parseInt(parts[2]), 'portal_end');
@@ -1796,11 +1768,6 @@ loadBtn.addEventListener('click', ()=>{
 
 /* ============================== INPUT ============================== */
 document.addEventListener('keydown', (e)=>{
-  if(e.code === 'KeyT'){
-    if(started && !paused && !chatOpen){ e.preventDefault(); openChat(); }
-    return;
-  }
-  if(chatOpen) return; // let the chat input's own listener handle everything while typing
   keys[e.code] = true;
   if(e.code === 'Escape' || e.code === 'KeyE'){
     if(!started) return;
@@ -1821,7 +1788,7 @@ document.addEventListener('keydown', (e)=>{
 });
 document.addEventListener('keyup', (e)=>{ keys[e.code] = false; });
 document.addEventListener('wheel', (e)=>{
-  if(!started || paused || chatOpen) return;
+  if(!started || paused) return;
   selectedSlot = (selectedSlot + (e.deltaY>0?1:-1) + HOTBAR.length) % HOTBAR.length;
   selectedType = HOTBAR[selectedSlot];
   updateHotbarUI();
@@ -1831,7 +1798,7 @@ renderer.domElement.addEventListener('contextmenu', (e)=> e.preventDefault());
 let isDraggingLook = false, dragMoved = false, dragLastX = 0, dragLastY = 0;
 
 document.addEventListener('mousemove', (e)=>{
-  if(!started || paused || chatOpen) return;
+  if(!started || paused) return;
   if(locked){
     const s = 0.0022 * mouseSensitivity;
     player.yaw -= e.movementX * s;
@@ -1851,7 +1818,7 @@ document.addEventListener('mousemove', (e)=>{
 });
 
 renderer.domElement.addEventListener('mousedown', (e)=>{
-  if(!started || paused || chatOpen) return;
+  if(!started || paused) return;
   if(locked){
     if(e.button === 0) performBreakAction();
     else if(e.button === 2) performPlaceAction();
@@ -2118,7 +2085,7 @@ function animate(){
   dt = Math.min(dt, 0.08);
   lastTime = now;
 
-  if(started && !paused && !chatOpen){
+  if(started && !paused){
     updatePlayer(dt);
     chunkTimer += dt;
     if(chunkTimer >= CHUNK_UPDATE_INTERVAL){
